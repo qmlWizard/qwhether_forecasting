@@ -1,0 +1,9 @@
+pennylane
+pennylane-lightning
+torch
+torchvision
+torchaudio
+scikit-learn
+matplotlib
+scipy
+ray
