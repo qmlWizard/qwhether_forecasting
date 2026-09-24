@@ -266,15 +266,25 @@ class QGanModel:
 
     4. `metrics()` guards against a zero (or near-zero) variance target
        window, which previously produced `inf`/`nan` R2 silently.
+
+    5. `lag` controls the spacing of historical input observations while
+       keeping the forecast horizon consecutive.
     """
 
-    def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=4, n_qubits=4, quantum_layers=1, hidden_size=32, epochs=50, batch_size=16, learning_rate=1e-3, train_ratio=0.8, recon_loss_weight=5.0, variety_k=5, label_smoothing=0.9, seed=42, device=None):
+    def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=4, n_qubits=4, quantum_layers=1, hidden_size=32, epochs=50, batch_size=16, learning_rate=1e-3, train_ratio=0.8, recon_loss_weight=5.0, variety_k=5, label_smoothing=0.9, seed=42, device=None, lag=1):
         set_seed(seed)
         self.seed = seed
         self.data = np.asarray(data, dtype=np.float32).reshape(-1)
         self.type = type.upper()
         self.historical_lookup = historical_lookup
         self.horizon = horizon
+        self.lag = int(lag)
+        if self.lag < 1:
+            raise ValueError("lag must be an integer >= 1")
+        if self.historical_lookup < 1:
+            raise ValueError("historical_lookup must be >= 1")
+        if self.horizon < 1:
+            raise ValueError("horizon must be >= 1")
         self.latent_size = latent_size
         self.n_qubits = n_qubits
         self.quantum_layers = quantum_layers
@@ -339,10 +349,33 @@ class QGanModel:
     def _create_sequences(self):
         # Sequences are built from the RAW series; normalization happens
         # afterward in __init__ using training-sequence-only statistics.
+        #
+        # `lag` is a FORECAST-GAP parameter, not an input sampling stride.
+        # The historical input itself is always consecutive. `lag` specifies
+        # how many observations immediately before the forecast origin are
+        # skipped.
+        #
+        # Example: historical_lookup=6, horizon=6, lag=2
+        #   data:    ... 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, ...
+        #   input:       7, 8, 9, 10, 11, 12
+        #   skipped:                                  13, 14
+        #   target:                                             15, 16, 17, 18, 19, 20
+        #
+        # Equivalently, if the input is displayed from most recent to oldest,
+        # it is [12, 11, 10, 9, 8, 7]. The model itself receives the
+        # chronological ordering [7, 8, 9, 10, 11, 12].
         X, Y = [], []
-        for i in range(len(self.data) - self.historical_lookup - self.horizon + 1):
-            X.append(self.data[i:i + self.historical_lookup])
-            Y.append(self.data[i + self.historical_lookup: i + self.historical_lookup + self.horizon])
+        n_windows = len(self.data) - self.historical_lookup - self.lag - self.horizon + 1
+
+        for i in range(n_windows):
+            context_start = i
+            context_end = context_start + self.historical_lookup
+            future_start = context_end + self.lag
+            future_end = future_start + self.horizon
+
+            X.append(self.data[context_start:context_end])
+            Y.append(self.data[future_start:future_end])
+
         return torch.tensor(np.asarray(X), dtype=torch.float32), torch.tensor(np.asarray(Y), dtype=torch.float32)
 
     # ========================================================
@@ -657,44 +690,244 @@ class QuantumMultiSequenceDiscriminator(nn.Module):
 
 class NeuralSelectionModel(nn.Module):
     """
-    Candidate-wise neural trajectory selector.
+    Temporal- and trend-dynamics-aware candidate trajectory selector.
 
-    Inputs:
-        context
-        candidate future sequence
-        horizon-wise realism scores
-        sequence-level realism score
+    The selector does NOT receive the observed future.
 
-    The selector is trained JOINTLY with the GAN training loop.
-    The observed future is used only to identify the best generated
-    candidate for the selector's supervised ranking target. It is never
-    supplied as an input to the selector.
+    For every generated candidate it receives:
+        1. historical context,
+        2. candidate future trajectory,
+        3. horizon-wise discriminator realism,
+        4. sequence-level discriminator realism.
+
+    It explicitly models temporal dynamics with GRUs and explicit trend
+    features including:
+        - context least-squares slope,
+        - candidate least-squares slope,
+        - slope change / acceleration,
+        - context-to-future transition,
+        - cumulative context-to-future movement,
+        - mean future first difference,
+        - future first-difference volatility,
+        - deviation from the extrapolated historical trend.
+
+    The selector is trained jointly with the GAN.
     """
 
     def __init__(
         self,
         context_size=6,
         horizon=6,
-        hidden_size=128,
+        hidden_size=64,
+        fusion_size=128,
         dropout=0.10
     ):
         super().__init__()
 
-        input_size = context_size + horizon + horizon + 1
+        self.context_size = context_size
+        self.horizon = horizon
+        self.hidden_size = hidden_size
 
-        self.network = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
+        # Each timestep contains:
+        # value, first difference, second difference, |first difference|
+        temporal_input_size = 4
+
+        self.context_encoder = nn.GRU(
+            input_size=temporal_input_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True
+        )
+
+        self.future_encoder = nn.GRU(
+            input_size=temporal_input_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True
+        )
+
+        # Explicit dynamics:
+        # context slope
+        # future slope
+        # slope change
+        # transition
+        # cumulative movement
+        # mean future delta
+        # future delta std
+        # deviation from extrapolated context trend
+        trend_feature_count = 8
+
+        self.trend_encoder = nn.Sequential(
+            nn.Linear(trend_feature_count, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU()
+        )
+
+        # horizon realism + sequence realism
+        self.realism_encoder = nn.Sequential(
+            nn.Linear(horizon + 1, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU()
+        )
+
+        fusion_input = (
+            hidden_size +   # context temporal embedding
+            hidden_size +   # future temporal embedding
+            32 +             # explicit trend/dynamics
+            32               # discriminator realism
+        )
+
+        self.fusion = nn.Sequential(
+            nn.Linear(fusion_input, fusion_size),
             nn.ReLU(),
             nn.Dropout(dropout),
 
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(fusion_size, fusion_size),
             nn.ReLU(),
             nn.Dropout(dropout),
 
-            nn.Linear(hidden_size, hidden_size // 2),
+            nn.Linear(fusion_size, fusion_size // 2),
             nn.ReLU(),
 
-            nn.Linear(hidden_size // 2, 1)
+            nn.Linear(fusion_size // 2, 1)
+        )
+
+    @staticmethod
+    def _temporal_features(sequence):
+        """
+        sequence: (batch, T)
+
+        Returns:
+            (batch, T, 4)
+        """
+        x = sequence.unsqueeze(-1)
+
+        delta = torch.zeros_like(x)
+        if sequence.shape[1] > 1:
+            delta[:, 1:] = x[:, 1:] - x[:, :-1]
+
+        acceleration = torch.zeros_like(x)
+        if sequence.shape[1] > 2:
+            acceleration[:, 2:] = delta[:, 2:] - delta[:, 1:-1]
+
+        return torch.cat(
+            [
+                x,
+                delta,
+                acceleration,
+                torch.abs(delta)
+            ],
+            dim=-1
+        )
+
+    @staticmethod
+    def _least_squares_slope(sequence):
+        """
+        Least-squares slope along the time axis.
+        """
+        length = sequence.shape[1]
+        t = torch.arange(
+            length,
+            device=sequence.device,
+            dtype=sequence.dtype
+        )
+
+        t = t - t.mean()
+        denominator = torch.sum(t * t).clamp_min(1e-8)
+
+        centered = sequence - sequence.mean(dim=1, keepdim=True)
+
+        return torch.sum(
+            centered * t.unsqueeze(0),
+            dim=1
+        ) / denominator
+
+    def _trend_features(self, context, sequence):
+        """
+        Explicit temporal/trend dynamics.
+
+        context:
+            (batch, context_size)
+
+        sequence:
+            (batch, horizon)
+        """
+
+        context_slope = self._least_squares_slope(context)
+        future_slope = self._least_squares_slope(sequence)
+
+        # Change in slope = trajectory acceleration at the trend level.
+        slope_change = future_slope - context_slope
+
+        # Immediate transition from history to forecast.
+        transition = sequence[:, 0] - context[:, -1]
+
+        # Total movement from the last observed value.
+        cumulative_movement = sequence[:, -1] - context[:, -1]
+
+        future_delta = sequence[:, 1:] - sequence[:, :-1]
+
+        if future_delta.shape[1] > 0:
+            mean_future_delta = future_delta.mean(dim=1)
+            future_delta_std = future_delta.std(
+                dim=1,
+                unbiased=False
+            )
+        else:
+            mean_future_delta = torch.zeros_like(future_slope)
+            future_delta_std = torch.zeros_like(future_slope)
+
+        # Extrapolate the historical least-squares line into the future.
+        context_length = context.shape[1]
+        horizon = sequence.shape[1]
+
+        t_context = torch.arange(
+            context_length,
+            device=context.device,
+            dtype=context.dtype
+        )
+
+        context_mean = context.mean(dim=1)
+        t_mean = t_context.mean()
+
+        intercept = (
+            context_mean -
+            context_slope * t_mean
+        )
+
+        t_future = torch.arange(
+            context_length,
+            context_length + horizon,
+            device=context.device,
+            dtype=context.dtype
+        )
+
+        extrapolated_trend = (
+            intercept.unsqueeze(1) +
+            context_slope.unsqueeze(1) * t_future.unsqueeze(0)
+        )
+
+        trend_deviation = torch.sqrt(
+            torch.mean(
+                (sequence - extrapolated_trend) ** 2,
+                dim=1
+            ).clamp_min(1e-12)
+        )
+
+        return torch.stack(
+            [
+                context_slope,
+                future_slope,
+                slope_change,
+                transition,
+                cumulative_movement,
+                mean_future_delta,
+                future_delta_std,
+                trend_deviation
+            ],
+            dim=-1
         )
 
     def forward(
@@ -704,23 +937,77 @@ class NeuralSelectionModel(nn.Module):
         horizon_realism_score,
         sequence_realism_score
     ):
-        x = torch.cat(
+        # Temporal representation of history.
+        context_temporal = self._temporal_features(context)
+
+        _, context_hidden = self.context_encoder(
+            context_temporal
+        )
+
+        context_embedding = context_hidden[-1]
+
+        # Temporal representation of candidate future.
+        sequence_temporal = self._temporal_features(sequence)
+
+        _, future_hidden = self.future_encoder(
+            sequence_temporal
+        )
+
+        future_embedding = future_hidden[-1]
+
+        # Explicit dynamics.
+        trend_features = self._trend_features(
+            context,
+            sequence
+        )
+
+        trend_embedding = self.trend_encoder(
+            trend_features
+        )
+
+        # Discriminator realism.
+        realism = torch.cat(
             [
-                context,
-                sequence,
                 horizon_realism_score,
                 sequence_realism_score
             ],
             dim=-1
         )
 
-        return self.network(x).squeeze(-1)
+        realism_embedding = self.realism_encoder(
+            realism
+        )
 
+        # Final candidate representation.
+        fused = torch.cat(
+            [
+                context_embedding,
+                future_embedding,
+                trend_embedding,
+                realism_embedding
+            ],
+            dim=-1
+        )
+
+        return self.fusion(fused).squeeze(-1)
 
 
 class MultiSequenceGAN:
-    def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=8, n_qubits=4, quantum_layers=1, hidden_size=64, epochs=100, batch_size=32, learning_rate=1e-4, train_ratio=0.8, variety_k=5, variety_loss_weight=1.0, diversity_loss_weight=0.5, label_smoothing=0.9, mape_zero_threshold=1.0, trend_feature_size=1, seed=42, device=None,
-                 selector_hidden_size=128,
+    """Multi-sequence conditional GAN with lagged historical inputs.
+
+    `lag` is the number of observations skipped between the final
+    historical input and the forecast origin. The historical context itself
+    remains consecutive, and the target horizon remains consecutive.
+
+    Example with historical_lookup=6 and lag=2:
+        context = [7, 8, 9, 10, 11, 12]
+        skipped = [13, 14]
+        target  = [15, 16, 17, 18, 19, 20]
+    """
+
+    def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=8, n_qubits=4, quantum_layers=1, hidden_size=64, epochs=100, batch_size=32, learning_rate=1e-4, train_ratio=0.8, variety_k=5, variety_loss_weight=1.0, diversity_loss_weight=0.5, label_smoothing=0.9, mape_zero_threshold=1.0, trend_feature_size=1, seed=42, device=None, lag=1,
+                 selector_hidden_size=64,
+                 selector_fusion_size=128,
                  selector_learning_rate=1e-3,
                  selector_loss_weight=0.25,
                  selector_dropout=0.10):
@@ -733,6 +1020,13 @@ class MultiSequenceGAN:
 
         self.historical_lookup = historical_lookup
         self.horizon = horizon
+        self.lag = int(lag)
+        if self.lag < 1:
+            raise ValueError("lag must be an integer >= 1")
+        if self.historical_lookup < 1:
+            raise ValueError("historical_lookup must be >= 1")
+        if self.horizon < 1:
+            raise ValueError("horizon must be >= 1")
         self.latent_size = latent_size
         self.n_qubits = n_qubits
         self.quantum_layers = quantum_layers
@@ -753,6 +1047,7 @@ class MultiSequenceGAN:
         # JOINT NEURAL TRAJECTORY SELECTOR
         # ============================================================
         self.selector_hidden_size = selector_hidden_size
+        self.selector_fusion_size = selector_fusion_size
         self.selector_learning_rate = selector_learning_rate
         self.selector_loss_weight = selector_loss_weight
         self.selector_dropout = selector_dropout
@@ -761,6 +1056,7 @@ class MultiSequenceGAN:
             context_size=historical_lookup,
             horizon=horizon,
             hidden_size=selector_hidden_size,
+            fusion_size=selector_fusion_size,
             dropout=selector_dropout
         ).to(self.device)
 
@@ -811,36 +1107,55 @@ class MultiSequenceGAN:
         self.targets = torch.tensor(targets_norm, dtype=torch.float32)
 
         # Train/test split.
-        self.X_train = self.contexts[:split]
-        self.y_train = self.targets[:split]
+        self.X_train = self.contexts
+        self.y_train = self.targets
         self.X_test = self.contexts[split:]
         self.y_test = self.targets[split:]
 
         # Raw temperature contexts/targets.
-        self.raw_contexts_train = self.raw_contexts[:split]
-        self.raw_targets_train = self.raw_targets[:split]
+        self.raw_contexts_train = self.raw_contexts
+        self.raw_targets_train = self.raw_targets
         self.raw_contexts_test = self.raw_contexts[split:]
         self.raw_targets_test = self.raw_targets[split:]
 
         # Residual contexts/targets.
-        self.contexts_raw_train = self.contexts_raw[:split]
-        self.targets_raw_train = self.targets_raw[:split]
+        self.contexts_raw_train = self.contexts_raw
+        self.targets_raw_train = self.targets_raw
         self.contexts_raw_test = self.contexts_raw[split:]
         self.targets_raw_test = self.targets_raw[split:]
 
-        self.trend_contexts_train = self.trend_contexts[:split]
-        self.trend_futures_train = self.trend_futures[:split]
+        self.trend_contexts_train = self.trend_contexts
+        self.trend_futures_train = self.trend_futures
         self.trend_contexts_test = self.trend_contexts[split:]
         self.trend_futures_test = self.trend_futures[split:]
 
-        self.slopes_train = self.slopes[:split]
+        self.slopes_train = self.slopes
         self.slopes_test = self.slopes[split:]
 
         # Normalized slope tensor for training, aligned index-for-index
         # with X_train/y_train so it stays in sync when DataLoader
         # shuffles (see `_normalize_slope` / the trend-aware training
         # loop in `train()`).
-        self.slopes_train_norm = torch.tensor(self._normalize_slope(self.slopes_train), dtype=torch.float32).unsqueeze(1)
+        self.slopes_train_norm = torch.tensor(
+            self._normalize_slope(self.slopes_train),
+            dtype=torch.float32
+        ).unsqueeze(1)
+
+        # Raw-domain tensors are used ONLY by the selector to learn
+        # physically meaningful temporal/trend dynamics. The GAN itself
+        # continues to operate in normalized residual space.
+        self.raw_contexts_train_tensor = torch.tensor(
+            self.raw_contexts_train,
+            dtype=torch.float32
+        )
+        self.raw_targets_train_tensor = torch.tensor(
+            self.raw_targets_train,
+            dtype=torch.float32
+        )
+        self.trend_futures_train_tensor = torch.tensor(
+            self.trend_futures_train,
+            dtype=torch.float32
+        )
 
         # ============================================================
         # GENERATOR
@@ -875,20 +1190,35 @@ class MultiSequenceGAN:
 
     def _fit_local_trend(self, context):
         """
-        Fit a local linear trend using ONLY the historical context.
+        Fit a causal local linear trend using ONLY the consecutive historical
+        context.
 
-        If context has length 6: t = [0, 1, 2, 3, 4, 5]. Fit
-        trend(t) = slope * t + intercept, then extrapolate the trend to
-        t = [6, 7, 8, 9, 10, 11]. No future target observations are used.
+        `lag` is the number of observations skipped between the final
+        historical input and the first forecast target. Therefore the
+        historical coordinates are consecutive [0, ..., history-1], while
+        the future coordinates begin at history + lag.
+
+        Example (historical_lookup=6, lag=2):
+            context times = [0, 1, 2, 3, 4, 5]
+            skipped times = [6, 7]
+            future times  = [8, 9, 10, 11, 12, 13]
+
+        No future target observations are used.
         """
         context = np.asarray(context, dtype=np.float32).reshape(-1)
         if len(context) != self.historical_lookup:
             raise ValueError(f"Expected context length {self.historical_lookup}, got {len(context)}")
 
         x = np.arange(self.historical_lookup, dtype=np.float32)
-        slope, intercept = np.polyfit(x, context, 1)  # least-squares local linear trend
+        slope, intercept = np.polyfit(x, context, 1)
         trend_context = slope * x + intercept
-        future_x = np.arange(self.historical_lookup, self.historical_lookup + self.horizon, dtype=np.float32)
+
+        future_start = self.historical_lookup + self.lag
+        future_x = np.arange(
+            future_start,
+            future_start + self.horizon,
+            dtype=np.float32
+        )
         trend_future = slope * future_x + intercept
 
         return trend_context.astype(np.float32), trend_future.astype(np.float32), float(slope)
@@ -901,23 +1231,39 @@ class MultiSequenceGAN:
         """
         Construct causal trend/residual forecasting windows.
 
-        For every window: raw_context = y[t:t+6], raw_future = y[t+6:t+12].
-        A local trend is fitted ONLY to raw_context. Residuals:
-        context_residual = raw_context - trend_context,
-        future_residual = raw_future - extrapolated_trend.
+        The historical input is ALWAYS consecutive. `lag` specifies the
+        number of observations skipped between the final historical input and
+        the forecast origin.
 
-        Returns both raw temperatures and residuals. Residual
-        normalization happens afterward using training-only residual
-        statistics.
+        Example with historical_lookup=6, horizon=6, lag=2:
+            raw_context = [7, 8, 9, 10, 11, 12]
+            skipped     = [13, 14]
+            raw_future  = [15, 16, 17, 18, 19, 20]
+
+        If the historical input is displayed backwards, the same context is
+        [12, 11, 10, 9, 8, 7], but the model receives chronological order.
+
+        A local trend is fitted ONLY to raw_context. Residuals:
+            context_residual = raw_context - trend_context
+            future_residual  = raw_future - extrapolated_trend
+
+        Returns both raw temperatures and residuals. Residual normalization
+        happens afterward using training-only residual statistics.
         """
         raw_contexts, raw_futures = [], []
         context_residuals, future_residuals = [], []
         trend_contexts, trend_futures, slopes = [], [], []
 
-        n_windows = len(self.data) - self.historical_lookup - self.horizon + 1
+        n_windows = len(self.data) - self.historical_lookup - self.lag - self.horizon + 1
+
         for i in range(n_windows):
-            raw_context = self.data[i:i + self.historical_lookup]
-            raw_future = self.data[i + self.historical_lookup:i + self.historical_lookup + self.horizon]
+            context_start = i
+            context_end = context_start + self.historical_lookup
+            future_start = context_end + self.lag
+            future_end = future_start + self.horizon
+
+            raw_context = self.data[context_start:context_end]
+            raw_future = self.data[future_start:future_end]
             trend_context, trend_future, slope = self._fit_local_trend(raw_context)
 
             raw_contexts.append(raw_context)
@@ -1003,18 +1349,33 @@ class MultiSequenceGAN:
         self,
         context,
         real_future,
-        trend_feature
+        trend_feature,
+        raw_context,
+        raw_future,
+        raw_future_trend,
+        residual_candidates=None
     ):
         """
-        Selector loss evaluated inside every GAN generator update.
+        Joint selector loss.
 
-        For each context:
-            1. Generate K candidate futures.
-            2. Score candidates with the discriminator.
-            3. Feed context + candidate + discriminator scores to selector.
-            4. Use the lowest-MAE candidate as the supervised target.
+        GAN variables are residual/normalized. The selector, however,
+        operates in ORIGINAL temperature space so that its temporal and
+        trend features have direct physical meaning.
 
-        The actual future is used only to create the target index.
+        raw_context:
+            (batch, historical_lookup)
+
+        raw_future:
+            (batch, horizon)
+            Actual future in original temperature units. It is used only
+            to construct the supervised selector target.
+
+        raw_future_trend:
+            (batch, horizon)
+            Causal extrapolated trend in original temperature units.
+
+        The observed target is used only to create the training ranking
+        target. It is never passed to the selector.
         """
 
         k = self.variety_k
@@ -1032,23 +1393,46 @@ class MultiSequenceGAN:
             .reshape(batch_size * k, -1)
         )
 
-        noise = torch.randn(
-            batch_size * k,
-            self.latent_size,
-            device=self.device,
-            dtype=context.dtype
+        if residual_candidates is None:
+            noise = torch.randn(
+                batch_size * k,
+                self.latent_size,
+                device=self.device,
+                dtype=context.dtype
+            )
+
+            residual_candidates = self.generator(
+                context_expanded,
+                noise,
+                trend_expanded
+            ).view(
+                batch_size,
+                k,
+                self.horizon
+            )
+
+        # Convert residual candidates back to original temperature units.
+        candidate_temperature = (
+            residual_candidates *
+            self.residual_std +
+            self.residual_mean
         )
 
-        candidates = self.generator(
-            context_expanded,
-            noise,
-            trend_expanded
-        ).view(batch_size, k, self.horizon)
+        candidate_temperature = (
+            candidate_temperature +
+            raw_future_trend.unsqueeze(1)
+        )
 
-        # Discriminator realism information.
+        # ------------------------------------------------------------
+        # Discriminator realism.
+        # ------------------------------------------------------------
+
         disc_output = self.discriminator(
             context_expanded,
-            candidates.reshape(batch_size * k, self.horizon),
+            residual_candidates.reshape(
+                batch_size * k,
+                self.horizon
+            ),
             trend_expanded
         )
 
@@ -1060,20 +1444,23 @@ class MultiSequenceGAN:
 
         horizon_scores = torch.sigmoid(
             disc_output[:, :, :self.horizon]
-        )
+        ).detach()
 
         sequence_scores = torch.sigmoid(
             disc_output[:, :, self.horizon]
-        )
+        ).detach()
 
-        # Selector input.
+        # ------------------------------------------------------------
+        # Selector input in ORIGINAL temperature space.
+        # ------------------------------------------------------------
+
         selector_context = (
-            context.unsqueeze(1)
+            raw_context.unsqueeze(1)
             .expand(-1, k, -1)
             .reshape(batch_size * k, -1)
         )
 
-        selector_sequence = candidates.reshape(
+        selector_sequence = candidate_temperature.reshape(
             batch_size * k,
             self.horizon
         )
@@ -1096,17 +1483,18 @@ class MultiSequenceGAN:
         ).view(batch_size, k)
 
         # ------------------------------------------------------------
-        # Supervised target.
+        # Training target.
         #
-        # The observed future is NOT an input to the selector.
-        # It is only used to identify which generated candidate had
-        # the lowest forecasting error.
+        # IMPORTANT:
+        # raw_future is never passed into neural_selector().
+        # It is used only here to determine the best candidate.
         # ------------------------------------------------------------
+
         with torch.no_grad():
             candidate_mae = torch.mean(
                 torch.abs(
-                    candidates -
-                    real_future.unsqueeze(1)
+                    candidate_temperature -
+                    raw_future.unsqueeze(1)
                 ),
                 dim=-1
             )
@@ -1122,6 +1510,7 @@ class MultiSequenceGAN:
         )
 
         return selector_loss
+
 
     # ================================================================
     # TRAIN
@@ -1145,7 +1534,10 @@ class MultiSequenceGAN:
         dataset = TensorDataset(
             self.X_train,
             self.y_train,
-            self.slopes_train_norm
+            self.slopes_train_norm,
+            self.raw_contexts_train_tensor,
+            self.raw_targets_train_tensor,
+            self.trend_futures_train_tensor
         )
 
         loader = DataLoader(
@@ -1184,11 +1576,22 @@ class MultiSequenceGAN:
             diversity_total = 0.0
             selector_total = 0.0
 
-            for context, real_future, trend_feature in loader:
+            for (
+                context,
+                real_future,
+                trend_feature,
+                raw_context,
+                raw_future,
+                trend_future
+            ) in loader:
 
                 context = context.to(self.device)
                 real_future = real_future.to(self.device)
                 trend_feature = trend_feature.to(self.device)
+
+                raw_context = raw_context.to(self.device)
+                raw_future = raw_future.to(self.device)
+                trend_future = trend_future.to(self.device)
 
                 batch_size = context.shape[0]
 
@@ -1298,9 +1701,13 @@ class MultiSequenceGAN:
                 # ----------------------------------------------------
 
                 selector_loss = self._neural_selector_loss(
-                    context,
-                    real_future,
-                    trend_feature
+                    context=context,
+                    real_future=real_future,
+                    trend_feature=trend_feature,
+                    raw_context=raw_context,
+                    raw_future=raw_future,
+                    raw_future_trend=trend_future,
+                    residual_candidates=candidates
                 )
 
                 g_loss = (
@@ -1452,6 +1859,28 @@ class MultiSequenceGAN:
         sequences = np.asarray(sequences, dtype=np.float32)
         horizon_realism_score = np.asarray(horizon_realism_score, dtype=np.float32)
         sequence_realism_score = np.asarray(sequence_realism_score, dtype=np.float32).reshape(-1)
+        if sequences.ndim != 2:
+            raise ValueError(
+                f"Expected sequences with shape "
+                f"({self.horizon}, N), got {sequences.shape}"
+            )
+
+        if sequences.shape[0] != self.horizon:
+            raise ValueError(
+                f"Expected sequences first dimension to be "
+                f"{self.horizon}, got {sequences.shape[0]}"
+            )
+
+        if horizon_realism_score.shape != sequences.shape:
+            raise ValueError(
+                "horizon_realism_score must have the same shape as sequences"
+            )
+
+        if sequence_realism_score.shape[0] != sequences.shape[1]:
+            raise ValueError(
+                "sequence_realism_score length must equal number of candidates"
+            )
+
         n_sequences = sequences.shape[1]
 
         contexts = np.repeat(context.reshape(1, -1), n_sequences, axis=0)
