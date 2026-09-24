@@ -993,18 +993,6 @@ class NeuralSelectionModel(nn.Module):
 
 
 class MultiSequenceGAN:
-    """Multi-sequence conditional GAN with lagged historical inputs.
-
-    `lag` is the number of observations skipped between the final
-    historical input and the forecast origin. The historical context itself
-    remains consecutive, and the target horizon remains consecutive.
-
-    Example with historical_lookup=6 and lag=2:
-        context = [7, 8, 9, 10, 11, 12]
-        skipped = [13, 14]
-        target  = [15, 16, 17, 18, 19, 20]
-    """
-
     def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=8, n_qubits=4, quantum_layers=1, hidden_size=64, epochs=100, batch_size=32, learning_rate=1e-4, train_ratio=0.8, variety_k=5, variety_loss_weight=1.0, diversity_loss_weight=0.5, label_smoothing=0.9, mape_zero_threshold=1.0, trend_feature_size=1, seed=42, device=None, lag=1,
                  selector_hidden_size=64,
                  selector_fusion_size=128,
@@ -1107,29 +1095,29 @@ class MultiSequenceGAN:
         self.targets = torch.tensor(targets_norm, dtype=torch.float32)
 
         # Train/test split.
-        self.X_train = self.contexts
-        self.y_train = self.targets
+        self.X_train = self.contexts[:split]
+        self.y_train = self.targets[:split]
         self.X_test = self.contexts[split:]
         self.y_test = self.targets[split:]
 
         # Raw temperature contexts/targets.
-        self.raw_contexts_train = self.raw_contexts
-        self.raw_targets_train = self.raw_targets
+        self.raw_contexts_train = self.raw_contexts[:split]
+        self.raw_targets_train = self.raw_targets[:split]
         self.raw_contexts_test = self.raw_contexts[split:]
         self.raw_targets_test = self.raw_targets[split:]
 
         # Residual contexts/targets.
-        self.contexts_raw_train = self.contexts_raw
-        self.targets_raw_train = self.targets_raw
+        self.contexts_raw_train = self.contexts_raw[:split]
+        self.targets_raw_train = self.targets_raw[:split]
         self.contexts_raw_test = self.contexts_raw[split:]
         self.targets_raw_test = self.targets_raw[split:]
 
-        self.trend_contexts_train = self.trend_contexts
-        self.trend_futures_train = self.trend_futures
+        self.trend_contexts_train = self.trend_contexts[:split]
+        self.trend_futures_train = self.trend_futures[:split]
         self.trend_contexts_test = self.trend_contexts[split:]
         self.trend_futures_test = self.trend_futures[split:]
 
-        self.slopes_train = self.slopes
+        self.slopes_train = self.slopes[:split]
         self.slopes_test = self.slopes[split:]
 
         # Normalized slope tensor for training, aligned index-for-index
@@ -1161,17 +1149,39 @@ class MultiSequenceGAN:
         # GENERATOR
         # ============================================================
         if self.type in ["QC", "QQ"]:
-            self.generator = QuantumMultiSequenceGenerator(context_size=historical_lookup, horizon=horizon, latent_size=latent_size, trend_feature_size=trend_feature_size, n_qubits=n_qubits, quantum_layers=quantum_layers, hidden_size=hidden_size)
+            self.generator = QuantumMultiSequenceGenerator(context_size=historical_lookup, 
+                                                           horizon=horizon, 
+                                                           latent_size=latent_size, 
+                                                           trend_feature_size=trend_feature_size, 
+                                                           n_qubits=n_qubits, 
+                                                           quantum_layers=quantum_layers, 
+                                                           hidden_size=hidden_size
+                                                        )
         else:
-            self.generator = ClassicalMultiSequenceGenerator(context_size=historical_lookup, horizon=horizon, latent_size=latent_size, trend_feature_size=trend_feature_size, hidden_size=hidden_size)
+            self.generator = ClassicalMultiSequenceGenerator(context_size=historical_lookup, 
+                                                             horizon=horizon, 
+                                                             latent_size=latent_size, 
+                                                             trend_feature_size=trend_feature_size, 
+                                                             hidden_size=hidden_size
+                                                            )
 
         # ============================================================
         # DISCRIMINATOR
         # ============================================================
         if self.type in ["CQ", "QQ"]:
-            self.discriminator = QuantumMultiSequenceDiscriminator(context_size=historical_lookup, horizon=horizon, trend_feature_size=trend_feature_size, n_qubits=n_qubits, quantum_layers=quantum_layers, hidden_size=hidden_size)
+            self.discriminator = QuantumMultiSequenceDiscriminator(context_size=historical_lookup, 
+                                                                   horizon=horizon, 
+                                                                   trend_feature_size=trend_feature_size, 
+                                                                   n_qubits=n_qubits, 
+                                                                   quantum_layers=quantum_layers, 
+                                                                   hidden_size=hidden_size
+                                                                )
         else:
-            self.discriminator = ClassicalMultiSequenceDiscriminator(context_size=historical_lookup, horizon=horizon, trend_feature_size=trend_feature_size, hidden_size=hidden_size)
+            self.discriminator = ClassicalMultiSequenceDiscriminator(context_size=historical_lookup, 
+                                                                     horizon=horizon, 
+                                                                     trend_feature_size=trend_feature_size, 
+                                                                     hidden_size=hidden_size
+                                                                    )
 
         self.generator = self.generator.to(self.device)
         self.discriminator = self.discriminator.to(self.device)
