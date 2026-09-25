@@ -274,13 +274,11 @@ class QGanModel:
     def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=4, n_qubits=4, quantum_layers=1, hidden_size=32, epochs=50, batch_size=16, learning_rate=1e-3, train_ratio=0.8, recon_loss_weight=5.0, variety_k=5, label_smoothing=0.9, seed=42, device=None, lag=1):
         set_seed(seed)
         self.seed = seed
-        self.data = np.asarray(data, dtype=np.float32).reshape(-1)
+        self.data = data
         self.type = type.upper()
         self.historical_lookup = historical_lookup
         self.horizon = horizon
         self.lag = int(lag)
-        if self.lag < 1:
-            raise ValueError("lag must be an integer >= 1")
         if self.historical_lookup < 1:
             raise ValueError("historical_lookup must be >= 1")
         if self.horizon < 1:
@@ -991,30 +989,165 @@ class NeuralSelectionModel(nn.Module):
 
         return self.fusion(fused).squeeze(-1)
 
-
 class MultiSequenceGAN:
-    def __init__(self, data, type="QC", historical_lookup=6, horizon=6, latent_size=8, n_qubits=4, quantum_layers=1, hidden_size=64, epochs=100, batch_size=32, learning_rate=1e-4, train_ratio=0.8, variety_k=5, variety_loss_weight=1.0, diversity_loss_weight=0.5, label_smoothing=0.9, mape_zero_threshold=1.0, trend_feature_size=1, seed=42, device=None, lag=1,
-                 selector_hidden_size=64,
-                 selector_fusion_size=128,
-                 selector_learning_rate=1e-3,
-                 selector_loss_weight=0.25,
-                 selector_dropout=0.10):
-        set_seed(seed)
-        self.seed = seed
-        self.data = np.asarray(data, dtype=np.float32).reshape(-1)
-        self.type = type.upper()
-        if self.type not in ["CC", "QC", "CQ", "QQ"]:
-            raise ValueError("type must be one of: CC, QC, CQ, QQ")
+    """
+    Multi-stock trend-aware residual GAN.
 
-        self.historical_lookup = historical_lookup
-        self.horizon = horizon
+    Major changes from the single-series implementation
+    -----------------------------------------------------
+
+    1. MULTIPLE STOCKS
+       `data` can now be supplied as:
+
+           {
+               "AAPL": np.ndarray,
+               "MSFT": np.ndarray,
+               "GOOG": np.ndarray,
+           }
+
+       Each stock is processed independently.
+
+       IMPORTANT:
+       The raw stock series are NEVER concatenated before
+       generating forecasting windows.
+
+       Instead:
+
+           stock -> split -> windows -> residuals -> normalization
+
+       and only then are the individual samples pooled into
+       one training/test dataset.
+
+    2. PER-STOCK NORMALIZATION
+       Every stock has its own residual mean/std and slope
+       mean/std.
+
+       These statistics are fitted ONLY on that stock's
+       training windows.
+
+    3. ZERO LAG
+       lag=0 is valid.
+
+       Example:
+
+           context = [t0, t1, t2, t3, t4, t5]
+           lag = 0
+           future  = [t6, t7, t8, ...]
+
+       For lag=2:
+
+           context = [t0, t1, t2, t3, t4, t5]
+           skipped = [t6, t7]
+           future  = [t8, t9, ...]
+
+    4. CHRONOLOGICAL TRAIN/TEST SPLIT
+       Every stock is split independently.
+
+           AAPL -> train / test
+           MSFT -> train / test
+           GOOG -> train / test
+
+       Windows never cross a train/test boundary.
+
+    5. STOCK IDENTIFIERS
+       Every generated sample retains a stock_id.
+
+       The stock_id is currently NOT passed to the neural
+       network. It is used for:
+
+           - per-stock normalization
+           - inverse normalization
+           - backtesting
+           - tracking which stock produced a sample
+
+       This gives a shared model across stocks while keeping
+       each stock's numerical scale separate.
+
+    Expected input
+    --------------
+
+        data = {
+            "AAPL": aapl_array,
+            "MSFT": msft_array,
+            "GOOG": goog_array,
+        }
+
+    Or for a single stock:
+
+        data = {
+            "AAPL": aapl_array
+        }
+    """
+
+    def __init__(
+        self,
+        data,
+        type="QC",
+        historical_lookup=6,
+        horizon=6,
+        latent_size=8,
+        n_qubits=4,
+        quantum_layers=1,
+        hidden_size=64,
+        epochs=100,
+        batch_size=32,
+        learning_rate=1e-4,
+        train_ratio=0.8,
+        variety_k=5,
+        variety_loss_weight=1.0,
+        diversity_loss_weight=0.5,
+        label_smoothing=0.9,
+        mape_zero_threshold=1.0,
+        trend_feature_size=1,
+        seed=42,
+        device=None,
+        lag=1,
+        selector_hidden_size=64,
+        selector_fusion_size=128,
+        selector_learning_rate=1e-3,
+        selector_loss_weight=0.25,
+        selector_dropout=0.10
+    ):
+
+        set_seed(seed)
+
+        self.seed = seed
+        self.type = type.upper()
+
+        if self.type not in ["CC", "QC", "CQ", "QQ"]:
+            raise ValueError(
+                "type must be one of: CC, QC, CQ, QQ"
+            )
+
+        # ============================================================
+        # BASIC PARAMETERS
+        # ============================================================
+
+        self.historical_lookup = int(historical_lookup)
+        self.horizon = int(horizon)
         self.lag = int(lag)
-        if self.lag < 1:
-            raise ValueError("lag must be an integer >= 1")
+
+        # lag=0 is explicitly supported.
+        if self.lag < 0:
+            raise ValueError(
+                "lag must be an integer >= 0"
+            )
+
         if self.historical_lookup < 1:
-            raise ValueError("historical_lookup must be >= 1")
+            raise ValueError(
+                "historical_lookup must be >= 1"
+            )
+
         if self.horizon < 1:
-            raise ValueError("horizon must be >= 1")
+            raise ValueError(
+                "horizon must be >= 1"
+            )
+
+        if not 0.0 < train_ratio < 1.0:
+            raise ValueError(
+                "train_ratio must be between 0 and 1"
+            )
+
         self.latent_size = latent_size
         self.n_qubits = n_qubits
         self.quantum_layers = quantum_layers
@@ -1023,17 +1156,40 @@ class MultiSequenceGAN:
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.train_ratio = train_ratio
+
         self.variety_k = variety_k
         self.variety_loss_weight = variety_loss_weight
         self.diversity_loss_weight = diversity_loss_weight
+
         self.label_smoothing = label_smoothing
         self.mape_zero_threshold = mape_zero_threshold
         self.trend_feature_size = trend_feature_size
+
         self.device = device or DEVICE
+
+        # ============================================================
+        # VALIDATE / STANDARDIZE INPUT DATA
+        # ============================================================
+
+        self.stock_data = self._prepare_stock_data(data)
+
+        self.stock_names = list(self.stock_data.keys())
+        self.num_stocks = len(self.stock_names)
+
+        self.stock_to_id = {
+            name: i
+            for i, name in enumerate(self.stock_names)
+        }
+
+        self.id_to_stock = {
+            i: name
+            for name, i in self.stock_to_id.items()
+        }
 
         # ============================================================
         # JOINT NEURAL TRAJECTORY SELECTOR
         # ============================================================
+
         self.selector_hidden_size = selector_hidden_size
         self.selector_fusion_size = selector_fusion_size
         self.selector_learning_rate = selector_learning_rate
@@ -1056,143 +1212,199 @@ class MultiSequenceGAN:
         self.neural_selector_fitted = False
 
         # ============================================================
-        # BUILD CAUSAL TREND / RESIDUAL DATASET
+        # BUILD MULTI-STOCK DATASET
         # ============================================================
-        self.raw_contexts, self.raw_targets, self.contexts_raw, self.targets_raw, self.trend_contexts, self.trend_futures, self.slopes = self._create_sequences()
 
-        # Sequence-level chronological split. No random splitting is used.
-        split = int(len(self.contexts_raw) * train_ratio)
-        self.sequence_split = split
-
-        # ------------------------------------------------------------
-        # Residual normalization
-        #
-        # IMPORTANT: statistics are fitted ONLY on training residuals.
-        # Both historical and future residuals from training windows are
-        # used to estimate the residual scale.
-        # ------------------------------------------------------------
-        train_context_residuals = self.contexts_raw[:split]
-        train_future_residuals = self.targets_raw[:split]
-        train_residual_values = np.concatenate([train_context_residuals.reshape(-1), train_future_residuals.reshape(-1)])
-        self.residual_mean = float(train_residual_values.mean())
-        self.residual_std = float(train_residual_values.std() + 1e-8)
-
-        # ------------------------------------------------------------
-        # Trend (slope) normalization -- fitted on TRAINING slopes only,
-        # same leakage-free pattern as the residual stats above. This
-        # normalized slope is the `trend_feature` fed into the generator
-        # and discriminator (see the ENHANCEMENT note in the class
-        # docstring).
-        # ------------------------------------------------------------
-        train_slopes = self.slopes[:split]
-        self.slope_mean = float(train_slopes.mean())
-        self.slope_std = float(train_slopes.std() + 1e-8)
-
-        # Normalize residual sequences.
-        contexts_norm = (self.contexts_raw - self.residual_mean) / self.residual_std
-        targets_norm = (self.targets_raw - self.residual_mean) / self.residual_std
-        self.contexts = torch.tensor(contexts_norm, dtype=torch.float32)
-        self.targets = torch.tensor(targets_norm, dtype=torch.float32)
-
-        # Train/test split.
-        self.X_train = self.contexts[:split]
-        self.y_train = self.targets[:split]
-        self.X_test = self.contexts[split:]
-        self.y_test = self.targets[split:]
-
-        # Raw temperature contexts/targets.
-        self.raw_contexts_train = self.raw_contexts[:split]
-        self.raw_targets_train = self.raw_targets[:split]
-        self.raw_contexts_test = self.raw_contexts[split:]
-        self.raw_targets_test = self.raw_targets[split:]
-
-        # Residual contexts/targets.
-        self.contexts_raw_train = self.contexts_raw[:split]
-        self.targets_raw_train = self.targets_raw[:split]
-        self.contexts_raw_test = self.contexts_raw[split:]
-        self.targets_raw_test = self.targets_raw[split:]
-
-        self.trend_contexts_train = self.trend_contexts[:split]
-        self.trend_futures_train = self.trend_futures[:split]
-        self.trend_contexts_test = self.trend_contexts[split:]
-        self.trend_futures_test = self.trend_futures[split:]
-
-        self.slopes_train = self.slopes[:split]
-        self.slopes_test = self.slopes[split:]
-
-        # Normalized slope tensor for training, aligned index-for-index
-        # with X_train/y_train so it stays in sync when DataLoader
-        # shuffles (see `_normalize_slope` / the trend-aware training
-        # loop in `train()`).
-        self.slopes_train_norm = torch.tensor(
-            self._normalize_slope(self.slopes_train),
-            dtype=torch.float32
-        ).unsqueeze(1)
-
-        # Raw-domain tensors are used ONLY by the selector to learn
-        # physically meaningful temporal/trend dynamics. The GAN itself
-        # continues to operate in normalized residual space.
-        self.raw_contexts_train_tensor = torch.tensor(
-            self.raw_contexts_train,
-            dtype=torch.float32
-        )
-        self.raw_targets_train_tensor = torch.tensor(
-            self.raw_targets_train,
-            dtype=torch.float32
-        )
-        self.trend_futures_train_tensor = torch.tensor(
-            self.trend_futures_train,
-            dtype=torch.float32
-        )
+        (
+            self.raw_contexts,
+            self.raw_targets,
+            self.contexts_raw,
+            self.targets_raw,
+            self.trend_contexts,
+            self.trend_futures,
+            self.slopes,
+            self.stock_ids,
+            self.sample_indices
+        ) = self._create_multistock_sequences()
 
         # ============================================================
         # GENERATOR
         # ============================================================
+
         if self.type in ["QC", "QQ"]:
-            self.generator = QuantumMultiSequenceGenerator(context_size=historical_lookup, 
-                                                           horizon=horizon, 
-                                                           latent_size=latent_size, 
-                                                           trend_feature_size=trend_feature_size, 
-                                                           n_qubits=n_qubits, 
-                                                           quantum_layers=quantum_layers, 
-                                                           hidden_size=hidden_size
-                                                        )
+
+            self.generator = QuantumMultiSequenceGenerator(
+                context_size=historical_lookup,
+                horizon=horizon,
+                latent_size=latent_size,
+                trend_feature_size=trend_feature_size,
+                n_qubits=n_qubits,
+                quantum_layers=quantum_layers,
+                hidden_size=hidden_size
+            )
+
         else:
-            self.generator = ClassicalMultiSequenceGenerator(context_size=historical_lookup, 
-                                                             horizon=horizon, 
-                                                             latent_size=latent_size, 
-                                                             trend_feature_size=trend_feature_size, 
-                                                             hidden_size=hidden_size
-                                                            )
+
+            self.generator = ClassicalMultiSequenceGenerator(
+                context_size=historical_lookup,
+                horizon=horizon,
+                latent_size=latent_size,
+                trend_feature_size=trend_feature_size,
+                hidden_size=hidden_size
+            )
 
         # ============================================================
         # DISCRIMINATOR
         # ============================================================
+
         if self.type in ["CQ", "QQ"]:
-            self.discriminator = QuantumMultiSequenceDiscriminator(context_size=historical_lookup, 
-                                                                   horizon=horizon, 
-                                                                   trend_feature_size=trend_feature_size, 
-                                                                   n_qubits=n_qubits, 
-                                                                   quantum_layers=quantum_layers, 
-                                                                   hidden_size=hidden_size
-                                                                )
+
+            self.discriminator = QuantumMultiSequenceDiscriminator(
+                context_size=historical_lookup,
+                horizon=horizon,
+                trend_feature_size=trend_feature_size,
+                n_qubits=n_qubits,
+                quantum_layers=quantum_layers,
+                hidden_size=hidden_size
+            )
+
         else:
-            self.discriminator = ClassicalMultiSequenceDiscriminator(context_size=historical_lookup, 
-                                                                     horizon=horizon, 
-                                                                     trend_feature_size=trend_feature_size, 
-                                                                     hidden_size=hidden_size
-                                                                    )
+
+            self.discriminator = ClassicalMultiSequenceDiscriminator(
+                context_size=historical_lookup,
+                horizon=horizon,
+                trend_feature_size=trend_feature_size,
+                hidden_size=hidden_size
+            )
 
         self.generator = self.generator.to(self.device)
         self.discriminator = self.discriminator.to(self.device)
 
         # ============================================================
-        # OPTIMIZERS (TTUR: discriminator lr = 2 * generator lr)
+        # OPTIMIZERS
         # ============================================================
+
         self.d_lr_multiplier = 2.0
-        self.g_optimizer = torch.optim.Adam(self.generator.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-        self.d_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=learning_rate * self.d_lr_multiplier, betas=(0.5, 0.999))
+
+        self.g_optimizer = torch.optim.Adam(
+            self.generator.parameters(),
+            lr=learning_rate,
+            betas=(0.5, 0.999)
+        )
+
+        self.d_optimizer = torch.optim.Adam(
+            self.discriminator.parameters(),
+            lr=learning_rate * self.d_lr_multiplier,
+            betas=(0.5, 0.999)
+        )
+
         self.criterion = nn.BCEWithLogitsLoss()
+
+    # ================================================================
+    # INPUT DATA PREPARATION
+    # ================================================================
+
+    @staticmethod
+    def _prepare_stock_data(data):
+        """
+        Convert the input into:
+
+            {
+                "STOCK_A": np.ndarray,
+                "STOCK_B": np.ndarray,
+                ...
+            }
+
+        Accepted forms:
+
+        1. Dictionary
+
+            {
+                "AAPL": array,
+                "MSFT": array
+            }
+
+        2. List / tuple
+
+            [
+                aapl_array,
+                msft_array,
+                goog_array
+            ]
+
+        In the list case stock names become:
+
+            STOCK_0
+            STOCK_1
+            STOCK_2
+        """
+
+        if isinstance(data, dict):
+
+            if len(data) == 0:
+                raise ValueError(
+                    "data dictionary is empty."
+                )
+
+            stock_data = {}
+
+            for stock_name, series in data.items():
+
+                series = np.asarray(
+                    series,
+                    dtype=np.float32
+                ).reshape(-1)
+
+                if len(series) == 0:
+                    raise ValueError(
+                        f"Stock '{stock_name}' contains no observations."
+                    )
+
+                if not np.all(np.isfinite(series)):
+                    raise ValueError(
+                        f"Stock '{stock_name}' contains NaN or infinite values."
+                    )
+
+                stock_data[str(stock_name)] = series
+
+            return stock_data
+
+        elif isinstance(data, (list, tuple)):
+
+            if len(data) == 0:
+                raise ValueError(
+                    "data list is empty."
+                )
+
+            stock_data = {}
+
+            for i, series in enumerate(data):
+
+                series = np.asarray(
+                    series,
+                    dtype=np.float32
+                ).reshape(-1)
+
+                if len(series) == 0:
+                    raise ValueError(
+                        f"Stock index {i} contains no observations."
+                    )
+
+                if not np.all(np.isfinite(series)):
+                    raise ValueError(
+                        f"Stock index {i} contains NaN or infinite values."
+                    )
+
+                stock_data[f"STOCK_{i}"] = series
+
+            return stock_data
+
+        else:
+
+            raise TypeError(
+                "data must be a dictionary of "
+                "{stock_name: np.ndarray} or a list/tuple of arrays."
+            )
 
     # ================================================================
     # CAUSAL LOCAL TREND
@@ -1200,159 +1412,1294 @@ class MultiSequenceGAN:
 
     def _fit_local_trend(self, context):
         """
-        Fit a causal local linear trend using ONLY the consecutive historical
-        context.
+        Fit a causal local linear trend using ONLY the historical context.
 
-        `lag` is the number of observations skipped between the final
-        historical input and the first forecast target. Therefore the
-        historical coordinates are consecutive [0, ..., history-1], while
-        the future coordinates begin at history + lag.
+        lag=0:
 
-        Example (historical_lookup=6, lag=2):
-            context times = [0, 1, 2, 3, 4, 5]
-            skipped times = [6, 7]
-            future times  = [8, 9, 10, 11, 12, 13]
+            context times = [0, 1, ..., H-1]
+            future times  = [H, H+1, ...]
 
-        No future target observations are used.
+        lag=2:
+
+            context times = [0, 1, ..., H-1]
+            skipped       = [H, H+1]
+            future times  = [H+2, H+3, ...]
+
+        No target/future observations are used to fit the trend.
         """
-        context = np.asarray(context, dtype=np.float32).reshape(-1)
+
+        context = np.asarray(
+            context,
+            dtype=np.float32
+        ).reshape(-1)
+
         if len(context) != self.historical_lookup:
-            raise ValueError(f"Expected context length {self.historical_lookup}, got {len(context)}")
+            raise ValueError(
+                f"Expected context length "
+                f"{self.historical_lookup}, "
+                f"got {len(context)}"
+            )
 
-        x = np.arange(self.historical_lookup, dtype=np.float32)
-        slope, intercept = np.polyfit(x, context, 1)
-        trend_context = slope * x + intercept
+        x = np.arange(
+            self.historical_lookup,
+            dtype=np.float32
+        )
 
-        future_start = self.historical_lookup + self.lag
+        # A context of length >= 2 is guaranteed by
+        # normal use, but handle length 1 safely.
+        if self.historical_lookup == 1:
+
+            slope = 0.0
+            intercept = float(context[0])
+
+        else:
+
+            slope, intercept = np.polyfit(
+                x,
+                context,
+                1
+            )
+
+        trend_context = (
+            slope * x + intercept
+        )
+
+        future_start = (
+            self.historical_lookup + self.lag
+        )
+
         future_x = np.arange(
             future_start,
             future_start + self.horizon,
             dtype=np.float32
         )
-        trend_future = slope * future_x + intercept
 
-        return trend_context.astype(np.float32), trend_future.astype(np.float32), float(slope)
-
-    # ================================================================
-    # DATASET CREATION
-    # ================================================================
-
-    def _create_sequences(self):
-        """
-        Construct causal trend/residual forecasting windows.
-
-        The historical input is ALWAYS consecutive. `lag` specifies the
-        number of observations skipped between the final historical input and
-        the forecast origin.
-
-        Example with historical_lookup=6, horizon=6, lag=2:
-            raw_context = [7, 8, 9, 10, 11, 12]
-            skipped     = [13, 14]
-            raw_future  = [15, 16, 17, 18, 19, 20]
-
-        If the historical input is displayed backwards, the same context is
-        [12, 11, 10, 9, 8, 7], but the model receives chronological order.
-
-        A local trend is fitted ONLY to raw_context. Residuals:
-            context_residual = raw_context - trend_context
-            future_residual  = raw_future - extrapolated_trend
-
-        Returns both raw temperatures and residuals. Residual normalization
-        happens afterward using training-only residual statistics.
-        """
-        raw_contexts, raw_futures = [], []
-        context_residuals, future_residuals = [], []
-        trend_contexts, trend_futures, slopes = [], [], []
-
-        n_windows = len(self.data) - self.historical_lookup - self.lag - self.horizon + 1
-
-        for i in range(n_windows):
-            context_start = i
-            context_end = context_start + self.historical_lookup
-            future_start = context_end + self.lag
-            future_end = future_start + self.horizon
-
-            raw_context = self.data[context_start:context_end]
-            raw_future = self.data[future_start:future_end]
-            trend_context, trend_future, slope = self._fit_local_trend(raw_context)
-
-            raw_contexts.append(raw_context)
-            raw_futures.append(raw_future)
-            context_residuals.append(raw_context - trend_context)
-            future_residuals.append(raw_future - trend_future)
-            trend_contexts.append(trend_context)
-            trend_futures.append(trend_future)
-            slopes.append(slope)
+        trend_future = (
+            slope * future_x + intercept
+        )
 
         return (
-            np.asarray(raw_contexts, dtype=np.float32),
-            np.asarray(raw_futures, dtype=np.float32),
-            np.asarray(context_residuals, dtype=np.float32),
-            np.asarray(future_residuals, dtype=np.float32),
-            np.asarray(trend_contexts, dtype=np.float32),
-            np.asarray(trend_futures, dtype=np.float32),
-            np.asarray(slopes, dtype=np.float32),
+            trend_context.astype(np.float32),
+            trend_future.astype(np.float32),
+            float(slope)
         )
 
     # ================================================================
-    # RESIDUAL NORMALIZATION HELPERS
+    # CREATE WINDOWS FOR ONE STOCK
     # ================================================================
 
-    def _normalize_residual(self, x):
-        return (np.asarray(x, dtype=np.float32) - self.residual_mean) / self.residual_std
-
-    def _inverse_residual(self, x):
-        return np.asarray(x, dtype=np.float32) * self.residual_std + self.residual_mean
-
-    def _normalize_slope(self, slope):
+    def _create_sequences_for_series(
+        self,
+        data,
+        stock_id,
+        split_index
+    ):
         """
-        Normalize a local trend slope (or array of slopes) using
-        TRAINING-slope statistics (`self.slope_mean`/`self.slope_std`,
-        fit in `__init__`). This is the `trend_feature` fed into the
-        generator/discriminator -- see the ENHANCEMENT note in the
-        `MultiSequenceGAN` class docstring.
+        Create train/test windows independently for ONE stock.
+
+        Nothing from another stock can enter these windows.
+
+        Returns two dictionaries:
+
+            train
+            test
+
+        Each contains:
+
+            raw_contexts
+            raw_targets
+            contexts_raw
+            targets_raw
+            trend_contexts
+            trend_futures
+            slopes
+            stock_ids
+            sample_indices
         """
-        return (np.asarray(slope, dtype=np.float32) - self.slope_mean) / self.slope_std
+
+        data = np.asarray(
+            data,
+            dtype=np.float32
+        ).reshape(-1)
+
+        train_data = data[:split_index]
+        test_data = data[split_index:]
+
+        train = self._create_windows_from_series(
+            train_data,
+            stock_id=stock_id
+        )
+
+        test = self._create_windows_from_series(
+            test_data,
+            stock_id=stock_id
+        )
+
+        return train, test
+
+    # ================================================================
+    # CREATE WINDOWS FROM A SINGLE CONTIGUOUS SERIES
+    # ================================================================
+
+    def _create_windows_from_series(
+        self,
+        data,
+        stock_id
+    ):
+        """
+        Create causal context/target pairs from ONE contiguous
+        stock series.
+
+        Formula:
+
+            context:
+                [i : i + historical_lookup]
+
+            skipped:
+                [context_end : context_end + lag]
+
+            target:
+                [context_end + lag :
+                 context_end + lag + horizon]
+
+        Therefore:
+
+            lag=0
+                target starts immediately after context.
+
+            lag=1
+                one observation is skipped.
+
+            lag=2
+                two observations are skipped.
+
+        """
+
+        data = np.asarray(
+            data,
+            dtype=np.float32
+        ).reshape(-1)
+
+        required_length = (
+            self.historical_lookup
+            + self.lag
+            + self.horizon
+        )
+
+        if len(data) < required_length:
+
+            return {
+                "raw_contexts": np.empty(
+                    (0, self.historical_lookup),
+                    dtype=np.float32
+                ),
+                "raw_targets": np.empty(
+                    (0, self.horizon),
+                    dtype=np.float32
+                ),
+                "contexts_raw": np.empty(
+                    (0, self.historical_lookup),
+                    dtype=np.float32
+                ),
+                "targets_raw": np.empty(
+                    (0, self.horizon),
+                    dtype=np.float32
+                ),
+                "trend_contexts": np.empty(
+                    (0, self.historical_lookup),
+                    dtype=np.float32
+                ),
+                "trend_futures": np.empty(
+                    (0, self.horizon),
+                    dtype=np.float32
+                ),
+                "slopes": np.empty(
+                    (0,),
+                    dtype=np.float32
+                ),
+                "stock_ids": np.empty(
+                    (0,),
+                    dtype=np.int64
+                ),
+                "sample_indices": np.empty(
+                    (0,),
+                    dtype=np.int64
+                )
+            }
+
+        n_windows = (
+            len(data)
+            - self.historical_lookup
+            - self.lag
+            - self.horizon
+            + 1
+        )
+
+        raw_contexts = []
+        raw_targets = []
+
+        context_residuals = []
+        future_residuals = []
+
+        trend_contexts = []
+        trend_futures = []
+
+        slopes = []
+        stock_ids = []
+        sample_indices = []
+
+        for i in range(n_windows):
+
+            context_start = i
+
+            context_end = (
+                context_start
+                + self.historical_lookup
+            )
+
+            future_start = (
+                context_end
+                + self.lag
+            )
+
+            future_end = (
+                future_start
+                + self.horizon
+            )
+
+            raw_context = data[
+                context_start:context_end
+            ]
+
+            raw_future = data[
+                future_start:future_end
+            ]
+
+            (
+                trend_context,
+                trend_future,
+                slope
+            ) = self._fit_local_trend(
+                raw_context
+            )
+
+            raw_contexts.append(
+                raw_context
+            )
+
+            raw_targets.append(
+                raw_future
+            )
+
+            context_residuals.append(
+                raw_context - trend_context
+            )
+
+            future_residuals.append(
+                raw_future - trend_future
+            )
+
+            trend_contexts.append(
+                trend_context
+            )
+
+            trend_futures.append(
+                trend_future
+            )
+
+            slopes.append(
+                slope
+            )
+
+            stock_ids.append(
+                stock_id
+            )
+
+            sample_indices.append(
+                i
+            )
+
+        return {
+            "raw_contexts": np.asarray(
+                raw_contexts,
+                dtype=np.float32
+            ),
+
+            "raw_targets": np.asarray(
+                raw_targets,
+                dtype=np.float32
+            ),
+
+            "contexts_raw": np.asarray(
+                context_residuals,
+                dtype=np.float32
+            ),
+
+            "targets_raw": np.asarray(
+                future_residuals,
+                dtype=np.float32
+            ),
+
+            "trend_contexts": np.asarray(
+                trend_contexts,
+                dtype=np.float32
+            ),
+
+            "trend_futures": np.asarray(
+                trend_futures,
+                dtype=np.float32
+            ),
+
+            "slopes": np.asarray(
+                slopes,
+                dtype=np.float32
+            ),
+
+            "stock_ids": np.asarray(
+                stock_ids,
+                dtype=np.int64
+            ),
+
+            "sample_indices": np.asarray(
+                sample_indices,
+                dtype=np.int64
+            )
+        }
+
+    # ================================================================
+    # FIT PER-STOCK TRAINING STATISTICS
+    # ================================================================
+
+    def _fit_stock_statistics(
+        self,
+        train_data
+    ):
+        """
+        Fit normalization statistics separately for each stock.
+
+        IMPORTANT:
+
+        Statistics are calculated ONLY from that stock's training
+        windows.
+
+        No test residuals are used.
+        """
+
+        self.stock_stats = {}
+
+        for stock_name, stock_id in self.stock_to_id.items():
+
+            stock_mask = (
+                train_data["stock_ids"] == stock_id
+            )
+
+            context_residuals = (
+                train_data["contexts_raw"][stock_mask]
+            )
+
+            target_residuals = (
+                train_data["targets_raw"][stock_mask]
+            )
+
+            slopes = (
+                train_data["slopes"][stock_mask]
+            )
+
+            if len(context_residuals) == 0:
+                raise ValueError(
+                    f"Stock '{stock_name}' has no "
+                    f"training windows."
+                )
+
+            residual_values = np.concatenate(
+                [
+                    context_residuals.reshape(-1),
+                    target_residuals.reshape(-1)
+                ]
+            )
+
+            residual_mean = float(
+                residual_values.mean()
+            )
+
+            residual_std = float(
+                residual_values.std() + 1e-8
+            )
+
+            slope_mean = float(
+                slopes.mean()
+            )
+
+            slope_std = float(
+                slopes.std() + 1e-8
+            )
+
+            self.stock_stats[stock_id] = {
+                "stock_name": stock_name,
+                "residual_mean": residual_mean,
+                "residual_std": residual_std,
+                "slope_mean": slope_mean,
+                "slope_std": slope_std
+            }
+
+    # ================================================================
+    # NORMALIZE ARRAY USING PER-STOCK STATISTICS
+    # ================================================================
+
+    def _normalize_residuals_by_stock(
+        self,
+        values,
+        stock_ids
+    ):
+        """
+        Normalize residuals using the statistics belonging to
+        each sample's stock.
+
+        `values` can be:
+
+            (N, historical_lookup)
+            (N, horizon)
+
+        `stock_ids`:
+
+            (N,)
+        """
+
+        values = np.asarray(
+            values,
+            dtype=np.float32
+        )
+
+        stock_ids = np.asarray(
+            stock_ids,
+            dtype=np.int64
+        )
+
+        output = np.empty_like(
+            values,
+            dtype=np.float32
+        )
+
+        for stock_id in np.unique(stock_ids):
+
+            mask = stock_ids == stock_id
+
+            stats = self.stock_stats[
+                int(stock_id)
+            ]
+
+            output[mask] = (
+                values[mask]
+                - stats["residual_mean"]
+            ) / stats["residual_std"]
+
+        return output
+
+    # ================================================================
+    # NORMALIZE SLOPE USING PER-STOCK STATISTICS
+    # ================================================================
+
+    def _normalize_slopes_by_stock(
+        self,
+        slopes,
+        stock_ids
+    ):
+        slopes = np.asarray(
+            slopes,
+            dtype=np.float32
+        )
+
+        stock_ids = np.asarray(
+            stock_ids,
+            dtype=np.int64
+        )
+
+        output = np.empty_like(
+            slopes,
+            dtype=np.float32
+        )
+
+        for stock_id in np.unique(stock_ids):
+
+            mask = stock_ids == stock_id
+
+            stats = self.stock_stats[
+                int(stock_id)
+            ]
+
+            output[mask] = (
+                slopes[mask]
+                - stats["slope_mean"]
+            ) / stats["slope_std"]
+
+        return output
+
+    # ================================================================
+    # NORMALIZE ONE STOCK
+    # ================================================================
+
+    def _normalize_single_stock_residual(
+        self,
+        values,
+        stock_id
+    ):
+        stats = self.stock_stats[
+            int(stock_id)
+        ]
+
+        return (
+            np.asarray(values, dtype=np.float32)
+            - stats["residual_mean"]
+        ) / stats["residual_std"]
+
+    # ================================================================
+    # INVERSE NORMALIZE ONE STOCK
+    # ================================================================
+
+    def _inverse_single_stock_residual(
+        self,
+        values,
+        stock_id
+    ):
+        stats = self.stock_stats[
+            int(stock_id)
+        ]
+
+        return (
+            np.asarray(values, dtype=np.float32)
+            * stats["residual_std"]
+            + stats["residual_mean"]
+        )
+
+    # ================================================================
+    # NORMALIZE ONE STOCK SLOPE
+    # ================================================================
+
+    def _normalize_single_stock_slope(
+        self,
+        slope,
+        stock_id
+    ):
+        stats = self.stock_stats[
+            int(stock_id)
+        ]
+
+        return (
+            float(slope)
+            - stats["slope_mean"]
+        ) / stats["slope_std"]
+
+    # ================================================================
+    # BUILD COMPLETE MULTI-STOCK DATASET
+    # ================================================================
+
+    def _create_multistock_sequences(self):
+        """
+        Main dataset builder.
+
+        IMPORTANT:
+
+        The stocks are NEVER concatenated before creating windows.
+
+        For every stock:
+
+            raw stock
+                ↓
+            chronological split
+                ↓
+            train windows
+            test windows
+                ↓
+            causal trend/residual
+                ↓
+            per-stock training statistics
+                ↓
+            normalization
+                ↓
+            pooled samples
+
+        This means the final dataset can be shuffled safely because
+        every sample is already a valid within-stock context/target pair.
+        """
+
+        train_parts = []
+        test_parts = []
+
+        self.stock_split_indices = {}
+
+        # ============================================================
+        # STEP 1:
+        # Split and create windows independently for every stock.
+        # ============================================================
+
+        for stock_name, stock_id in self.stock_to_id.items():
+
+            data = self.stock_data[
+                stock_name
+            ]
+
+            split_index = int(
+                len(data) * self.train_ratio
+            )
+
+            # Need enough data in both portions.
+            minimum_required = (
+                self.historical_lookup
+                + self.lag
+                + self.horizon
+            )
+
+            if split_index < minimum_required:
+
+                raise ValueError(
+                    f"Stock '{stock_name}' has only "
+                    f"{len(data)} observations. "
+                    f"Training portion contains "
+                    f"{split_index} observations, but at least "
+                    f"{minimum_required} are required to generate "
+                    f"one training window."
+                )
+
+            test_length = (
+                len(data) - split_index
+            )
+
+            if test_length < minimum_required:
+
+                raise ValueError(
+                    f"Stock '{stock_name}' has only "
+                    f"{test_length} observations in its test "
+                    f"portion. At least {minimum_required} are "
+                    f"required to generate one test window."
+                )
+
+            self.stock_split_indices[
+                stock_name
+            ] = split_index
+
+            train_part, test_part = (
+                self._create_sequences_for_series(
+                    data=data,
+                    stock_id=stock_id,
+                    split_index=split_index
+                )
+            )
+
+            train_parts.append(
+                train_part
+            )
+
+            test_parts.append(
+                test_part
+            )
+
+        # ============================================================
+        # STEP 2:
+        # Pool TRAINING WINDOWS.
+        #
+        # This is where concatenation is allowed.
+        #
+        # We concatenate WINDOWS/SAMPLES, not raw time series.
+        # ============================================================
+
+        train_data = self._concatenate_parts(
+            train_parts
+        )
+
+        test_data = self._concatenate_parts(
+            test_parts
+        )
+
+        # ============================================================
+        # STEP 3:
+        # Fit normalization statistics ONLY using TRAINING samples.
+        # ============================================================
+
+        self._fit_stock_statistics(
+            train_data
+        )
+
+        # ============================================================
+        # STEP 4:
+        # Normalize train/test independently using the corresponding
+        # stock's TRAINING statistics.
+        # ============================================================
+
+        train_contexts_norm = (
+            self._normalize_residuals_by_stock(
+                train_data["contexts_raw"],
+                train_data["stock_ids"]
+            )
+        )
+
+        train_targets_norm = (
+            self._normalize_residuals_by_stock(
+                train_data["targets_raw"],
+                train_data["stock_ids"]
+            )
+        )
+
+        test_contexts_norm = (
+            self._normalize_residuals_by_stock(
+                test_data["contexts_raw"],
+                test_data["stock_ids"]
+            )
+        )
+
+        test_targets_norm = (
+            self._normalize_residuals_by_stock(
+                test_data["targets_raw"],
+                test_data["stock_ids"]
+            )
+        )
+
+        # ============================================================
+        # STEP 5:
+        # Normalize slopes using per-stock training statistics.
+        # ============================================================
+
+        train_slopes_norm = (
+            self._normalize_slopes_by_stock(
+                train_data["slopes"],
+                train_data["stock_ids"]
+            )
+        )
+
+        test_slopes_norm = (
+            self._normalize_slopes_by_stock(
+                test_data["slopes"],
+                test_data["stock_ids"]
+            )
+        )
+
+        # ============================================================
+        # Store TRAINING arrays
+        # ============================================================
+
+        self.raw_contexts_train = train_data[
+            "raw_contexts"
+        ]
+
+        self.raw_targets_train = train_data[
+            "raw_targets"
+        ]
+
+        self.contexts_raw_train = train_data[
+            "contexts_raw"
+        ]
+
+        self.targets_raw_train = train_data[
+            "targets_raw"
+        ]
+
+        self.trend_contexts_train = train_data[
+            "trend_contexts"
+        ]
+
+        self.trend_futures_train = train_data[
+            "trend_futures"
+        ]
+
+        self.slopes_train = train_data[
+            "slopes"
+        ]
+
+        self.stock_ids_train = train_data[
+            "stock_ids"
+        ]
+
+        self.sample_indices_train = train_data[
+            "sample_indices"
+        ]
+
+        # ============================================================
+        # Store TEST arrays
+        # ============================================================
+
+        self.raw_contexts_test = test_data[
+            "raw_contexts"
+        ]
+
+        self.raw_targets_test = test_data[
+            "raw_targets"
+        ]
+
+        self.contexts_raw_test = test_data[
+            "contexts_raw"
+        ]
+
+        self.targets_raw_test = test_data[
+            "targets_raw"
+        ]
+
+        self.trend_contexts_test = test_data[
+            "trend_contexts"
+        ]
+
+        self.trend_futures_test = test_data[
+            "trend_futures"
+        ]
+
+        self.slopes_test = test_data[
+            "slopes"
+        ]
+
+        self.stock_ids_test = test_data[
+            "stock_ids"
+        ]
+
+        self.sample_indices_test = test_data[
+            "sample_indices"
+        ]
+
+        # ============================================================
+        # Normalized pooled datasets
+        # ============================================================
+
+        self.X_train = torch.tensor(
+            train_contexts_norm,
+            dtype=torch.float32
+        )
+
+        self.y_train = torch.tensor(
+            train_targets_norm,
+            dtype=torch.float32
+        )
+
+        self.X_test = torch.tensor(
+            test_contexts_norm,
+            dtype=torch.float32
+        )
+
+        self.y_test = torch.tensor(
+            test_targets_norm,
+            dtype=torch.float32
+        )
+
+        self.slopes_train_norm = torch.tensor(
+            train_slopes_norm,
+            dtype=torch.float32
+        ).unsqueeze(1)
+
+        self.slopes_test_norm = torch.tensor(
+            test_slopes_norm,
+            dtype=torch.float32
+        ).unsqueeze(1)
+
+        # ============================================================
+        # Raw tensors for selector
+        # ============================================================
+
+        self.raw_contexts_train_tensor = torch.tensor(
+            self.raw_contexts_train,
+            dtype=torch.float32
+        )
+
+        self.raw_targets_train_tensor = torch.tensor(
+            self.raw_targets_train,
+            dtype=torch.float32
+        )
+
+        self.trend_futures_train_tensor = torch.tensor(
+            self.trend_futures_train,
+            dtype=torch.float32
+        )
+
+        # ============================================================
+        # Combined arrays retained for compatibility
+        # ============================================================
+
+        self.raw_contexts = np.concatenate(
+            [
+                self.raw_contexts_train,
+                self.raw_contexts_test
+            ],
+            axis=0
+        )
+
+        self.raw_targets = np.concatenate(
+            [
+                self.raw_targets_train,
+                self.raw_targets_test
+            ],
+            axis=0
+        )
+
+        self.contexts_raw = np.concatenate(
+            [
+                self.contexts_raw_train,
+                self.contexts_raw_test
+            ],
+            axis=0
+        )
+
+        self.targets_raw = np.concatenate(
+            [
+                self.targets_raw_train,
+                self.targets_raw_test
+            ],
+            axis=0
+        )
+
+        self.trend_contexts = np.concatenate(
+            [
+                self.trend_contexts_train,
+                self.trend_contexts_test
+            ],
+            axis=0
+        )
+
+        self.trend_futures = np.concatenate(
+            [
+                self.trend_futures_train,
+                self.trend_futures_test
+            ],
+            axis=0
+        )
+
+        self.slopes = np.concatenate(
+            [
+                self.slopes_train,
+                self.slopes_test
+            ],
+            axis=0
+        )
+
+        self.stock_ids = np.concatenate(
+            [
+                self.stock_ids_train,
+                self.stock_ids_test
+            ],
+            axis=0
+        )
+
+        # There is no longer one meaningful global sequence split.
+        self.sequence_split = len(
+            self.X_train
+        )
+
+        # Useful diagnostics.
+        self._print_dataset_summary()
+
+        return (
+            self.raw_contexts,
+            self.raw_targets,
+            self.contexts_raw,
+            self.targets_raw,
+            self.trend_contexts,
+            self.trend_futures,
+            self.slopes,
+            self.stock_ids,
+            np.concatenate(
+                [
+                    self.sample_indices_train,
+                    self.sample_indices_test
+                ],
+                axis=0
+            )
+        )
+
+    # ================================================================
+    # CONCATENATE GENERATED WINDOWS
+    # ================================================================
+
+    @staticmethod
+    def _concatenate_parts(parts):
+        """
+        Concatenate already-generated samples.
+
+        This function NEVER receives raw stock time series.
+
+        It only combines valid context/target windows.
+        """
+
+        keys = [
+            "raw_contexts",
+            "raw_targets",
+            "contexts_raw",
+            "targets_raw",
+            "trend_contexts",
+            "trend_futures",
+            "slopes",
+            "stock_ids",
+            "sample_indices"
+        ]
+
+        output = {}
+
+        for key in keys:
+
+            arrays = [
+                part[key]
+                for part in parts
+                if len(part[key]) > 0
+            ]
+
+            if len(arrays) == 0:
+
+                # Determine dimensionality from the key.
+                if key in [
+                    "raw_contexts",
+                    "contexts_raw",
+                    "trend_contexts"
+                ]:
+                    shape = (
+                        0,
+                        parts[0][key].shape[1]
+                    )
+
+                elif key in [
+                    "raw_targets",
+                    "targets_raw",
+                    "trend_futures"
+                ]:
+                    shape = (
+                        0,
+                        parts[0][key].shape[1]
+                    )
+
+                else:
+                    shape = (0,)
+
+                output[key] = np.empty(
+                    shape,
+                    dtype=parts[0][key].dtype
+                )
+
+            else:
+
+                output[key] = np.concatenate(
+                    arrays,
+                    axis=0
+                )
+
+        return output
+
+    # ================================================================
+    # DATASET SUMMARY
+    # ================================================================
+
+    def _print_dataset_summary(self):
+
+        print("\n" + "=" * 72)
+        print("MULTI-STOCK DATASET")
+        print("=" * 72)
+
+        print(
+            f"Number of stocks : {self.num_stocks}"
+        )
+
+        print(
+            f"Historical lookup: {self.historical_lookup}"
+        )
+
+        print(
+            f"Forecast horizon : {self.horizon}"
+        )
+
+        print(
+            f"Lag              : {self.lag}"
+        )
+
+        print(
+            f"Train samples    : {len(self.X_train)}"
+        )
+
+        print(
+            f"Test samples     : {len(self.X_test)}"
+        )
+
+        print("\nPer-stock statistics:")
+
+        for stock_name, stock_id in self.stock_to_id.items():
+
+            train_count = int(
+                np.sum(
+                    self.stock_ids_train == stock_id
+                )
+            )
+
+            test_count = int(
+                np.sum(
+                    self.stock_ids_test == stock_id
+                )
+            )
+
+            stats = self.stock_stats[
+                stock_id
+            ]
+
+            print(
+                f"\n{stock_name}"
+            )
+
+            print(
+                f"  train windows : {train_count}"
+            )
+
+            print(
+                f"  test windows  : {test_count}"
+            )
+
+            print(
+                f"  residual mean : "
+                f"{stats['residual_mean']:.6f}"
+            )
+
+            print(
+                f"  residual std  : "
+                f"{stats['residual_std']:.6f}"
+            )
+
+            print(
+                f"  slope mean    : "
+                f"{stats['slope_mean']:.6f}"
+            )
+
+            print(
+                f"  slope std     : "
+                f"{stats['slope_std']:.6f}"
+            )
+
+        print("=" * 72)
+
+    # ================================================================
+    # NORMALIZATION HELPERS
+    # ================================================================
+
+    def _normalize_residual(self, x, stock_id):
+
+        return self._normalize_single_stock_residual(
+            x,
+            stock_id
+        )
+
+    def _inverse_residual(self, x, stock_id):
+
+        return self._inverse_single_stock_residual(
+            x,
+            stock_id
+        )
+
+    def _normalize_slope(self, slope, stock_id):
+
+        return self._normalize_single_stock_slope(
+            slope,
+            stock_id
+        )
 
     # ================================================================
     # VARIETY + DIVERSITY LOSS
     # ================================================================
 
-    def _variety_and_diversity_loss(self, context, real_future, trend_feature):
+    def _variety_and_diversity_loss(
+        self,
+        context,
+        real_future,
+        trend_feature
+    ):
         """
-        Sample `variety_k` residual futures per context.
+        Sample variety_k residual futures per context.
 
-        variety_loss: best-of-k L2 distance to the real residual future.
-        diversity_loss: negative pairwise distance between candidate
-        residual futures. Both operate entirely in normalized residual
-        space. `trend_feature` (normalized local slope, shape (batch,
-        trend_feature_size)) is passed to every generator call so
-        candidates are conditioned on how strong the local trend was --
-        see the ENHANCEMENT note in the class docstring.
+        variety_loss:
+            best-of-k L2 distance to real future.
+
+        diversity_loss:
+            negative pairwise distance between candidates.
         """
+
         k = self.variety_k
         batch_size = context.shape[0]
 
-        context_expanded = context.unsqueeze(1).expand(-1, k, -1).reshape(batch_size * k, -1)
-        trend_feature_expanded = trend_feature.unsqueeze(1).expand(-1, k, -1).reshape(batch_size * k, -1)
-        noise_k = torch.randn(batch_size * k, self.latent_size, device=self.device)
-        candidates = self.generator(context_expanded, noise_k, trend_feature_expanded).view(batch_size, k, self.horizon)
+        context_expanded = (
+            context
+            .unsqueeze(1)
+            .expand(-1, k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
+        )
 
-        distances_to_real = torch.norm(candidates - real_future.unsqueeze(1), dim=2)
-        variety_loss = distances_to_real.min(dim=1).values.mean()
+        trend_feature_expanded = (
+            trend_feature
+            .unsqueeze(1)
+            .expand(-1, k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
+        )
+
+        noise_k = torch.randn(
+            batch_size * k,
+            self.latent_size,
+            device=self.device
+        )
+
+        candidates = self.generator(
+            context_expanded,
+            noise_k,
+            trend_feature_expanded
+        ).view(
+            batch_size,
+            k,
+            self.horizon
+        )
+
+        distances_to_real = torch.norm(
+            candidates
+            - real_future.unsqueeze(1),
+            dim=2
+        )
+
+        variety_loss = (
+            distances_to_real
+            .min(dim=1)
+            .values
+            .mean()
+        )
 
         if k > 1:
-            diff = candidates.unsqueeze(2) - candidates.unsqueeze(1)
-            pairwise_dist = torch.norm(diff, dim=-1)
-            mean_pairwise_dist = pairwise_dist.sum(dim=(1, 2)) / (k * (k - 1))
-            diversity_loss = -mean_pairwise_dist.mean()
-        else:
-            diversity_loss = torch.zeros((), device=self.device)
 
-        return variety_loss, diversity_loss, candidates, context_expanded, trend_feature_expanded
+            diff = (
+                candidates.unsqueeze(2)
+                - candidates.unsqueeze(1)
+            )
+
+            pairwise_dist = torch.norm(
+                diff,
+                dim=-1
+            )
+
+            mean_pairwise_dist = (
+                pairwise_dist.sum(
+                    dim=(1, 2)
+                )
+                / (k * (k - 1))
+            )
+
+            diversity_loss = (
+                -mean_pairwise_dist.mean()
+            )
+
+        else:
+
+            diversity_loss = torch.zeros(
+                (),
+                device=self.device
+            )
+
+        return (
+            variety_loss,
+            diversity_loss,
+            candidates,
+            context_expanded,
+            trend_feature_expanded
+        )
 
     # ================================================================
-    # JOINT NEURAL SELECTOR LOSS
+    # NEURAL SELECTOR LOSS
     # ================================================================
 
     def _neural_selector_loss(
@@ -1366,44 +2713,37 @@ class MultiSequenceGAN:
         residual_candidates=None
     ):
         """
-        Joint selector loss.
+        Selector operates in original price/temperature space.
 
-        GAN variables are residual/normalized. The selector, however,
-        operates in ORIGINAL temperature space so that its temporal and
-        trend features have direct physical meaning.
-
-        raw_context:
-            (batch, historical_lookup)
-
-        raw_future:
-            (batch, horizon)
-            Actual future in original temperature units. It is used only
-            to construct the supervised selector target.
-
-        raw_future_trend:
-            (batch, horizon)
-            Causal extrapolated trend in original temperature units.
-
-        The observed target is used only to create the training ranking
-        target. It is never passed to the selector.
+        `raw_future` is used only to create the supervised
+        candidate-ranking target.
         """
 
         k = self.variety_k
         batch_size = context.shape[0]
 
         context_expanded = (
-            context.unsqueeze(1)
+            context
+            .unsqueeze(1)
             .expand(-1, k, -1)
-            .reshape(batch_size * k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
         )
 
         trend_expanded = (
-            trend_feature.unsqueeze(1)
+            trend_feature
+            .unsqueeze(1)
             .expand(-1, k, -1)
-            .reshape(batch_size * k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
         )
 
         if residual_candidates is None:
+
             noise = torch.randn(
                 batch_size * k,
                 self.latent_size,
@@ -1421,21 +2761,124 @@ class MultiSequenceGAN:
                 self.horizon
             )
 
-        # Convert residual candidates back to original temperature units.
-        candidate_temperature = (
-            residual_candidates *
-            self.residual_std +
-            self.residual_mean
+        # ============================================================
+        # IMPORTANT:
+        #
+        # At this point candidates belong to DIFFERENT stocks in the
+        # same batch potentially.
+        #
+        # Therefore this method receives candidates already normalized
+        # using each sample's stock-specific statistics.
+        #
+        # To reconstruct original units we need stock ids.
+        #
+        # The current training call therefore uses the helper below
+        # through `_denormalize_batch_candidates`.
+        # ============================================================
+
+        raise RuntimeError(
+            "_neural_selector_loss should be called through "
+            "_neural_selector_loss_with_stock_ids."
         )
 
-        candidate_temperature = (
-            candidate_temperature +
-            raw_future_trend.unsqueeze(1)
+    # ================================================================
+    # STOCK-AWARE SELECTOR LOSS
+    # ================================================================
+
+    def _neural_selector_loss_with_stock_ids(
+        self,
+        context,
+        real_future,
+        trend_feature,
+        raw_context,
+        raw_future,
+        raw_future_trend,
+        stock_ids,
+        residual_candidates=None
+    ):
+
+        k = self.variety_k
+        batch_size = context.shape[0]
+
+        context_expanded = (
+            context
+            .unsqueeze(1)
+            .expand(-1, k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
         )
 
-        # ------------------------------------------------------------
-        # Discriminator realism.
-        # ------------------------------------------------------------
+        trend_expanded = (
+            trend_feature
+            .unsqueeze(1)
+            .expand(-1, k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
+        )
+
+        if residual_candidates is None:
+
+            noise = torch.randn(
+                batch_size * k,
+                self.latent_size,
+                device=self.device,
+                dtype=context.dtype
+            )
+
+            residual_candidates = self.generator(
+                context_expanded,
+                noise,
+                trend_expanded
+            ).view(
+                batch_size,
+                k,
+                self.horizon
+            )
+
+        # ============================================================
+        # Convert each candidate back to its STOCK'S original units.
+        # ============================================================
+
+        candidate_temperature = torch.empty_like(
+            residual_candidates
+        )
+
+        for stock_id in torch.unique(
+            stock_ids
+        ):
+
+            stock_id_int = int(
+                stock_id.item()
+            )
+
+            mask = (
+                stock_ids == stock_id
+            )
+
+            stats = self.stock_stats[
+                stock_id_int
+            ]
+
+            candidate_temperature[
+                mask
+            ] = (
+                residual_candidates[mask]
+                * stats["residual_std"]
+                + stats["residual_mean"]
+            )
+
+        candidate_temperature = (
+            candidate_temperature
+            + raw_future_trend.unsqueeze(1)
+        )
+
+        # ============================================================
+        # Discriminator realism
+        # ============================================================
 
         disc_output = self.discriminator(
             context_expanded,
@@ -1453,36 +2896,53 @@ class MultiSequenceGAN:
         )
 
         horizon_scores = torch.sigmoid(
-            disc_output[:, :, :self.horizon]
+            disc_output[
+                :, :, :self.horizon
+            ]
         ).detach()
 
         sequence_scores = torch.sigmoid(
-            disc_output[:, :, self.horizon]
+            disc_output[
+                :, :, self.horizon
+            ]
         ).detach()
 
-        # ------------------------------------------------------------
-        # Selector input in ORIGINAL temperature space.
-        # ------------------------------------------------------------
+        # ============================================================
+        # Selector inputs
+        # ============================================================
 
         selector_context = (
-            raw_context.unsqueeze(1)
+            raw_context
+            .unsqueeze(1)
             .expand(-1, k, -1)
-            .reshape(batch_size * k, -1)
+            .reshape(
+                batch_size * k,
+                -1
+            )
         )
 
-        selector_sequence = candidate_temperature.reshape(
-            batch_size * k,
-            self.horizon
+        selector_sequence = (
+            candidate_temperature
+            .reshape(
+                batch_size * k,
+                self.horizon
+            )
         )
 
-        selector_horizon_scores = horizon_scores.reshape(
-            batch_size * k,
-            self.horizon
+        selector_horizon_scores = (
+            horizon_scores
+            .reshape(
+                batch_size * k,
+                self.horizon
+            )
         )
 
-        selector_sequence_scores = sequence_scores.reshape(
-            batch_size * k,
-            1
+        selector_sequence_scores = (
+            sequence_scores
+            .reshape(
+                batch_size * k,
+                1
+            )
         )
 
         selector_logits = self.neural_selector(
@@ -1490,21 +2950,21 @@ class MultiSequenceGAN:
             selector_sequence,
             selector_horizon_scores,
             selector_sequence_scores
-        ).view(batch_size, k)
+        ).view(
+            batch_size,
+            k
+        )
 
-        # ------------------------------------------------------------
-        # Training target.
-        #
-        # IMPORTANT:
-        # raw_future is never passed into neural_selector().
-        # It is used only here to determine the best candidate.
-        # ------------------------------------------------------------
+        # ============================================================
+        # Supervised candidate target
+        # ============================================================
 
         with torch.no_grad():
+
             candidate_mae = torch.mean(
                 torch.abs(
-                    candidate_temperature -
-                    raw_future.unsqueeze(1)
+                    candidate_temperature
+                    - raw_future.unsqueeze(1)
                 ),
                 dim=-1
             )
@@ -1521,25 +2981,11 @@ class MultiSequenceGAN:
 
         return selector_loss
 
-
     # ================================================================
     # TRAIN
     # ================================================================
 
     def train(self):
-        """
-        Joint GAN + neural selector training.
-
-        Every training iteration performs:
-
-            1. discriminator update
-            2. generator adversarial/variety/diversity update
-            3. neural selector update
-
-        The selector loss is also included in the generator-side objective
-        with `selector_loss_weight`, so the generator and selector are
-        trained together rather than in two separate phases.
-        """
 
         dataset = TensorDataset(
             self.X_train,
@@ -1547,7 +2993,11 @@ class MultiSequenceGAN:
             self.slopes_train_norm,
             self.raw_contexts_train_tensor,
             self.raw_targets_train_tensor,
-            self.trend_futures_train_tensor
+            self.trend_futures_train_tensor,
+            torch.tensor(
+                self.stock_ids_train,
+                dtype=torch.long
+            )
         )
 
         loader = DataLoader(
@@ -1565,18 +3015,58 @@ class MultiSequenceGAN:
         }
 
         print(
-            f"\nTraining Model C MultiSequenceGAN type={self.type}"
+            f"\nTraining MultiSequenceGAN "
+            f"type={self.type}"
         )
+
         print(
             f"Generator: "
             f"{'Quantum' if self.type in ['QC', 'QQ'] else 'Classical'}"
         )
+
         print(
             f"Discriminator: "
             f"{'Quantum' if self.type in ['CQ', 'QQ'] else 'Classical'}"
         )
-        print("Trend: causal local linear (trend-aware residual GAN)")
-        print("Selector: jointly trained neural trajectory selector")
+
+        print(
+            f"Stocks: {self.num_stocks}"
+        )
+
+        print(
+            f"Train samples: {len(self.X_train)}"
+        )
+
+        print(
+            f"Test samples: {len(self.X_test)}"
+        )
+
+        print(
+            f"Historical lookup: {self.historical_lookup}"
+        )
+
+        print(
+            f"Horizon: {self.horizon}"
+        )
+
+        print(
+            f"Lag: {self.lag}"
+        )
+
+        print(
+            "Trend: causal local linear "
+            "(trend-aware residual GAN)"
+        )
+
+        print(
+            "Normalization: per-stock "
+            "(training-only statistics)"
+        )
+
+        print(
+            "Selector: jointly trained "
+            "neural trajectory selector"
+        )
 
         for epoch in range(self.epochs):
 
@@ -1592,16 +3082,37 @@ class MultiSequenceGAN:
                 trend_feature,
                 raw_context,
                 raw_future,
-                trend_future
+                trend_future,
+                stock_ids
             ) in loader:
 
-                context = context.to(self.device)
-                real_future = real_future.to(self.device)
-                trend_feature = trend_feature.to(self.device)
+                context = context.to(
+                    self.device
+                )
 
-                raw_context = raw_context.to(self.device)
-                raw_future = raw_future.to(self.device)
-                trend_future = trend_future.to(self.device)
+                real_future = real_future.to(
+                    self.device
+                )
+
+                trend_feature = trend_feature.to(
+                    self.device
+                )
+
+                raw_context = raw_context.to(
+                    self.device
+                )
+
+                raw_future = raw_future.to(
+                    self.device
+                )
+
+                trend_future = trend_future.to(
+                    self.device
+                )
+
+                stock_ids = stock_ids.to(
+                    self.device
+                )
 
                 batch_size = context.shape[0]
 
@@ -1618,7 +3129,9 @@ class MultiSequenceGAN:
                 )
 
                 real_labels = (
-                    torch.ones_like(real_output)
+                    torch.ones_like(
+                        real_output
+                    )
                     * self.label_smoothing
                 )
 
@@ -1645,7 +3158,9 @@ class MultiSequenceGAN:
                     trend_feature
                 )
 
-                fake_labels = torch.zeros_like(fake_output)
+                fake_labels = torch.zeros_like(
+                    fake_output
+                )
 
                 fake_loss = self.criterion(
                     fake_output,
@@ -1653,7 +3168,8 @@ class MultiSequenceGAN:
                 )
 
                 d_loss = (
-                    real_loss + fake_loss
+                    real_loss
+                    + fake_loss
                 ) / 2.0
 
                 d_loss.backward()
@@ -1706,25 +3222,31 @@ class MultiSequenceGAN:
                     generator_labels
                 )
 
-                # ----------------------------------------------------
-                # Joint neural selector loss.
-                # ----------------------------------------------------
+                # ====================================================
+                # STOCK-AWARE SELECTOR LOSS
+                # ====================================================
 
-                selector_loss = self._neural_selector_loss(
-                    context=context,
-                    real_future=real_future,
-                    trend_feature=trend_feature,
-                    raw_context=raw_context,
-                    raw_future=raw_future,
-                    raw_future_trend=trend_future,
-                    residual_candidates=candidates
+                selector_loss = (
+                    self._neural_selector_loss_with_stock_ids(
+                        context=context,
+                        real_future=real_future,
+                        trend_feature=trend_feature,
+                        raw_context=raw_context,
+                        raw_future=raw_future,
+                        raw_future_trend=trend_future,
+                        stock_ids=stock_ids,
+                        residual_candidates=candidates
+                    )
                 )
 
                 g_loss = (
                     adversarial_loss
-                    + self.variety_loss_weight * variety_loss
-                    + self.diversity_loss_weight * diversity_loss
-                    + self.selector_loss_weight * selector_loss
+                    + self.variety_loss_weight
+                    * variety_loss
+                    + self.diversity_loss_weight
+                    * diversity_loss
+                    + self.selector_loss_weight
+                    * selector_loss
                 )
 
                 g_loss.backward()
@@ -1744,27 +3266,70 @@ class MultiSequenceGAN:
 
                 g_total += g_loss.item()
                 d_total += d_loss.item()
-                variety_total += variety_loss.item()
-                diversity_total += diversity_loss.item()
-                selector_total += selector_loss.item()
 
-            g_avg = g_total / max(len(loader), 1)
-            d_avg = d_total / max(len(loader), 1)
-            variety_avg = variety_total / max(len(loader), 1)
-            diversity_avg = diversity_total / max(len(loader), 1)
-            selector_avg = selector_total / max(len(loader), 1)
+                variety_total += (
+                    variety_loss.item()
+                )
 
-            history["generator_loss"].append(g_avg)
-            history["discriminator_loss"].append(d_avg)
-            history["variety_loss"].append(variety_avg)
-            history["diversity_loss"].append(diversity_avg)
-            history["selector_loss"].append(selector_avg)
+                diversity_total += (
+                    diversity_loss.item()
+                )
+
+                selector_total += (
+                    selector_loss.item()
+                )
+
+            g_avg = (
+                g_total
+                / max(len(loader), 1)
+            )
+
+            d_avg = (
+                d_total
+                / max(len(loader), 1)
+            )
+
+            variety_avg = (
+                variety_total
+                / max(len(loader), 1)
+            )
+
+            diversity_avg = (
+                diversity_total
+                / max(len(loader), 1)
+            )
+
+            selector_avg = (
+                selector_total
+                / max(len(loader), 1)
+            )
+
+            history[
+                "generator_loss"
+            ].append(g_avg)
+
+            history[
+                "discriminator_loss"
+            ].append(d_avg)
+
+            history[
+                "variety_loss"
+            ].append(variety_avg)
+
+            history[
+                "diversity_loss"
+            ].append(diversity_avg)
+
+            history[
+                "selector_loss"
+            ].append(selector_avg)
 
             if (
                 epoch == 0
                 or (epoch + 1) % 10 == 0
                 or epoch == self.epochs - 1
             ):
+
                 print(
                     f"[{self.type}] "
                     f"Epoch {epoch + 1}/{self.epochs} "
@@ -1780,343 +3345,1426 @@ class MultiSequenceGAN:
         return history
 
     # ================================================================
-    # GENERATE N TEMPERATURE SEQUENCES
+    # GENERATE N SEQUENCES
     # ================================================================
 
-    def generate_sequences(self, context, n_sequences=100):
+    def generate_sequences(
+        self,
+        context,
+        stock,
+        n_sequences=100
+    ):
         """
-        Generate N temperature trajectories.
+        Generate stochastic future trajectories for a particular stock.
 
-        Pipeline: raw context -> causal local trend -> historical
-        residual -> normalize -> GAN (conditioned on the normalized
-        local slope, `trend_feature` -- see the ENHANCEMENT note in the
-        class docstring) -> future residual -> inverse normalize ->
-        + local future trend -> temperature ensemble.
+        `stock` can be:
 
-        Returns:
-            futures: (horizon, n_sequences), original temperature units
-            horizon_realism_score: (horizon, n_sequences)
-            sequence_realism_score: (n_sequences,)
-            trend_future: (horizon,)
-            residual_futures: (horizon, n_sequences), original residual units
+            "AAPL"
+
+        or:
+
+            0
+
+        The stock is required because normalization is stock-specific.
         """
+
         self.generator.eval()
         self.discriminator.eval()
 
-        context = np.asarray(context, dtype=np.float32).reshape(-1)
+        context = np.asarray(
+            context,
+            dtype=np.float32
+        ).reshape(-1)
+
         if len(context) != self.historical_lookup:
-            raise ValueError(f"Expected context length {self.historical_lookup}, got {len(context)}")
+            raise ValueError(
+                f"Expected context length "
+                f"{self.historical_lookup}, "
+                f"got {len(context)}"
+            )
 
-        # 1. Fit causal local trend.
-        trend_context, trend_future, slope = self._fit_local_trend(context)
+        stock_id = self._resolve_stock_id(
+            stock
+        )
 
-        # 2. Historical residual.
-        context_residual = context - trend_context
+        # ============================================================
+        # 1. Causal local trend
+        # ============================================================
 
-        # 3. Normalize residual and slope.
-        context_residual_norm = (context_residual - self.residual_mean) / self.residual_std
-        context_tensor = torch.tensor(context_residual_norm, dtype=torch.float32, device=self.device)
-        context_batch = context_tensor.unsqueeze(0).repeat(n_sequences, 1)
+        (
+            trend_context,
+            trend_future,
+            slope
+        ) = self._fit_local_trend(
+            context
+        )
 
-        slope_norm = self._normalize_slope(slope)
-        trend_feature = torch.tensor([[slope_norm]], dtype=torch.float32, device=self.device).repeat(n_sequences, 1)
+        # ============================================================
+        # 2. Historical residual
+        # ============================================================
 
-        # 4. Latent variables.
-        noise = torch.randn(n_sequences, self.latent_size, device=self.device)
+        context_residual = (
+            context - trend_context
+        )
 
-        # 5. Generate future residuals.
+        # ============================================================
+        # 3. Stock-specific normalization
+        # ============================================================
+
+        context_residual_norm = (
+            self._normalize_single_stock_residual(
+                context_residual,
+                stock_id
+            )
+        )
+
+        context_tensor = torch.tensor(
+            context_residual_norm,
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        context_batch = (
+            context_tensor
+            .unsqueeze(0)
+            .repeat(
+                n_sequences,
+                1
+            )
+        )
+
+        slope_norm = (
+            self._normalize_single_stock_slope(
+                slope,
+                stock_id
+            )
+        )
+
+        trend_feature = torch.tensor(
+            [[slope_norm]],
+            dtype=torch.float32,
+            device=self.device
+        ).repeat(
+            n_sequences,
+            1
+        )
+
+        # ============================================================
+        # 4. Latent variables
+        # ============================================================
+
+        noise = torch.randn(
+            n_sequences,
+            self.latent_size,
+            device=self.device
+        )
+
+        # ============================================================
+        # 5. Generate residual futures
+        # ============================================================
+
         with torch.no_grad():
-            residual_future_norm = self.generator(context_batch, noise, trend_feature)
-            discriminator_output = self.discriminator(context_batch, residual_future_norm, trend_feature)
 
-        # 6. Realism scores.
-        horizon_logits = discriminator_output[:, :self.horizon]
-        sequence_logits = discriminator_output[:, self.horizon]
-        horizon_realism_score = torch.sigmoid(horizon_logits).cpu().numpy().T
-        sequence_realism_score = torch.sigmoid(sequence_logits).cpu().numpy()
+            residual_future_norm = (
+                self.generator(
+                    context_batch,
+                    noise,
+                    trend_feature
+                )
+            )
 
-        # 7. Inverse residual normalization.
-        residual_futures = residual_future_norm.cpu().numpy() * self.residual_std + self.residual_mean  # shape: (n_sequences, horizon)
+            discriminator_output = (
+                self.discriminator(
+                    context_batch,
+                    residual_future_norm,
+                    trend_feature
+                )
+            )
 
-        # 8. Reconstruct temperature.
-        futures = residual_futures + trend_future[None, :]
+        # ============================================================
+        # 6. Realism scores
+        # ============================================================
 
-        # 9. Return in standard ensemble format.
-        return futures.T.astype(np.float32), horizon_realism_score.astype(np.float32), sequence_realism_score.astype(np.float32), trend_future.astype(np.float32), residual_futures.T.astype(np.float32)
+        horizon_logits = (
+            discriminator_output[
+                :, :self.horizon
+            ]
+        )
+
+        sequence_logits = (
+            discriminator_output[
+                :, self.horizon
+            ]
+        )
+
+        horizon_realism_score = (
+            torch.sigmoid(
+                horizon_logits
+            )
+            .cpu()
+            .numpy()
+            .T
+        )
+
+        sequence_realism_score = (
+            torch.sigmoid(
+                sequence_logits
+            )
+            .cpu()
+            .numpy()
+        )
+
+        # ============================================================
+        # 7. Stock-specific inverse normalization
+        # ============================================================
+
+        residual_futures = (
+            self._inverse_single_stock_residual(
+                residual_future_norm
+                .cpu()
+                .numpy(),
+                stock_id
+            )
+        )
+
+        # ============================================================
+        # 8. Reconstruct original series
+        # ============================================================
+
+        futures = (
+            residual_futures
+            + trend_future[None, :]
+        )
+
+        # ============================================================
+        # 9. Return
+        # ============================================================
+
+        return (
+            futures.T.astype(np.float32),
+            horizon_realism_score.astype(
+                np.float32
+            ),
+            sequence_realism_score.astype(
+                np.float32
+            ),
+            trend_future.astype(
+                np.float32
+            ),
+            residual_futures.T.astype(
+                np.float32
+            )
+        )
+
+    # ================================================================
+    # RESOLVE STOCK
+    # ================================================================
+
+    def _resolve_stock_id(self, stock):
+
+        if isinstance(stock, str):
+
+            if stock not in self.stock_to_id:
+                raise ValueError(
+                    f"Unknown stock '{stock}'. "
+                    f"Available stocks: "
+                    f"{self.stock_names}"
+                )
+
+            return self.stock_to_id[
+                stock
+            ]
+
+        stock_id = int(stock)
+
+        if stock_id not in self.id_to_stock:
+            raise ValueError(
+                f"Invalid stock_id {stock_id}. "
+                f"Valid IDs: "
+                f"{list(self.id_to_stock.keys())}"
+            )
+
+        return stock_id
 
     # ================================================================
     # SELECT BEST TRAJECTORY
     # ================================================================
 
     @staticmethod
-    def select_best_trajectory(horizon_realism_score, sequence_realism_score, alpha=0.5, horizon_agg="min"):
+    def select_best_trajectory(
+        horizon_realism_score,
+        sequence_realism_score,
+        alpha=0.5,
+        horizon_agg="min"
+    ):
+
         if horizon_agg == "min":
-            horizon_agg_score = horizon_realism_score.min(axis=0)
+
+            horizon_agg_score = (
+                horizon_realism_score.min(
+                    axis=0
+                )
+            )
+
         elif horizon_agg == "mean":
-            horizon_agg_score = horizon_realism_score.mean(axis=0)
+
+            horizon_agg_score = (
+                horizon_realism_score.mean(
+                    axis=0
+                )
+            )
+
         elif horizon_agg == "geo_mean":
-            horizon_agg_score = np.exp(np.mean(np.log(np.clip(horizon_realism_score, 1e-8, 1.0)), axis=0))
+
+            horizon_agg_score = np.exp(
+                np.mean(
+                    np.log(
+                        np.clip(
+                            horizon_realism_score,
+                            1e-8,
+                            1.0
+                        )
+                    ),
+                    axis=0
+                )
+            )
+
         else:
-            raise ValueError("horizon_agg must be one of: 'min', 'mean', 'geo_mean'")
 
-        composite_score = alpha * sequence_realism_score + (1.0 - alpha) * horizon_agg_score
-        best_index = int(np.argmax(composite_score))
-        return best_index, composite_score
+            raise ValueError(
+                "horizon_agg must be one of: "
+                "'min', 'mean', 'geo_mean'"
+            )
 
-    def neural_selection(self, context, sequences, horizon_realism_score, sequence_realism_score):
-        if not self.neural_selector_fitted: raise RuntimeError("Neural selector has not been trained. Run model.train() first.")
-        context = np.asarray(context, dtype=np.float32).reshape(-1)
-        sequences = np.asarray(sequences, dtype=np.float32)
-        horizon_realism_score = np.asarray(horizon_realism_score, dtype=np.float32)
-        sequence_realism_score = np.asarray(sequence_realism_score, dtype=np.float32).reshape(-1)
+        composite_score = (
+            alpha * sequence_realism_score
+            + (1.0 - alpha)
+            * horizon_agg_score
+        )
+
+        best_index = int(
+            np.argmax(
+                composite_score
+            )
+        )
+
+        return (
+            best_index,
+            composite_score
+        )
+
+    # ================================================================
+    # NEURAL SELECTION
+    # ================================================================
+
+    def neural_selection(
+        self,
+        context,
+        sequences,
+        horizon_realism_score,
+        sequence_realism_score
+    ):
+
+        if not self.neural_selector_fitted:
+
+            raise RuntimeError(
+                "Neural selector has not been trained. "
+                "Run model.train() first."
+            )
+
+        context = np.asarray(
+            context,
+            dtype=np.float32
+        ).reshape(-1)
+
+        sequences = np.asarray(
+            sequences,
+            dtype=np.float32
+        )
+
+        horizon_realism_score = np.asarray(
+            horizon_realism_score,
+            dtype=np.float32
+        )
+
+        sequence_realism_score = np.asarray(
+            sequence_realism_score,
+            dtype=np.float32
+        ).reshape(-1)
+
         if sequences.ndim != 2:
+
             raise ValueError(
                 f"Expected sequences with shape "
-                f"({self.horizon}, N), got {sequences.shape}"
+                f"({self.horizon}, N), "
+                f"got {sequences.shape}"
             )
 
         if sequences.shape[0] != self.horizon:
+
             raise ValueError(
-                f"Expected sequences first dimension to be "
-                f"{self.horizon}, got {sequences.shape[0]}"
+                f"Expected sequences first dimension "
+                f"to be {self.horizon}, "
+                f"got {sequences.shape[0]}"
             )
 
-        if horizon_realism_score.shape != sequences.shape:
+        if (
+            horizon_realism_score.shape
+            != sequences.shape
+        ):
+
             raise ValueError(
-                "horizon_realism_score must have the same shape as sequences"
+                "horizon_realism_score must have "
+                "the same shape as sequences"
             )
 
-        if sequence_realism_score.shape[0] != sequences.shape[1]:
+        if (
+            sequence_realism_score.shape[0]
+            != sequences.shape[1]
+        ):
+
             raise ValueError(
-                "sequence_realism_score length must equal number of candidates"
+                "sequence_realism_score length must "
+                "equal number of candidates"
             )
 
         n_sequences = sequences.shape[1]
 
-        contexts = np.repeat(context.reshape(1, -1), n_sequences, axis=0)
-        candidate_sequences = sequences.T
-        candidate_horizon_scores = horizon_realism_score.T
-        candidate_sequence_scores = (sequence_realism_score.reshape(-1, 1))
+        contexts = np.repeat(
+            context.reshape(1, -1),
+            n_sequences,
+            axis=0
+        )
 
-        contexts = torch.tensor(contexts, dtype=torch.float32, device=self.device)
-        candidate_sequences = torch.tensor(candidate_sequences, dtype=torch.float32, device=self.device)
-        candidate_horizon_scores = torch.tensor(candidate_horizon_scores, dtype=torch.float32, device=self.device)
-        candidate_sequence_scores = torch.tensor(candidate_sequence_scores, dtype=torch.float32, device=self.device)
+        candidate_sequences = (
+            sequences.T
+        )
+
+        candidate_horizon_scores = (
+            horizon_realism_score.T
+        )
+
+        candidate_sequence_scores = (
+            sequence_realism_score.reshape(
+                -1,
+                1
+            )
+        )
+
+        contexts = torch.tensor(
+            contexts,
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        candidate_sequences = torch.tensor(
+            candidate_sequences,
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        candidate_horizon_scores = torch.tensor(
+            candidate_horizon_scores,
+            dtype=torch.float32,
+            device=self.device
+        )
+
+        candidate_sequence_scores = torch.tensor(
+            candidate_sequence_scores,
+            dtype=torch.float32,
+            device=self.device
+        )
 
         self.neural_selector.eval()
 
         with torch.no_grad():
-            logits = self.neural_selector(contexts, candidate_sequences, candidate_horizon_scores, candidate_sequence_scores)
-            neural_score = torch.sigmoid(logits).cpu().numpy()
-        best_index = int(np.argmax(neural_score))
-        return best_index, neural_score
 
-    def predict(self, context, n_sequences=100, selection="composite", alpha=0.75, horizon_agg="mean"):
-        sequences, horizon_realism_score, sequence_realism_score, trend_future, residual_futures = self.generate_sequences(context, n_sequences)
+            logits = self.neural_selector(
+                contexts,
+                candidate_sequences,
+                candidate_horizon_scores,
+                candidate_sequence_scores
+            )
+
+            neural_score = (
+                torch.sigmoid(logits)
+                .cpu()
+                .numpy()
+            )
+
+        best_index = int(
+            np.argmax(
+                neural_score
+            )
+        )
+
+        return (
+            best_index,
+            neural_score
+        )
+
+    # ================================================================
+    # PREDICT
+    # ================================================================
+
+    def predict(
+        self,
+        context,
+        stock,
+        n_sequences=100,
+        selection="composite",
+        alpha=0.75,
+        horizon_agg="mean"
+    ):
+
+        (
+            sequences,
+            horizon_realism_score,
+            sequence_realism_score,
+            trend_future,
+            residual_futures
+        ) = self.generate_sequences(
+            context=context,
+            stock=stock,
+            n_sequences=n_sequences
+        )
+
         if selection == "composite":
-            best_index, selection_score = self.select_best_trajectory(horizon_realism_score, sequence_realism_score, alpha=alpha, horizon_agg=horizon_agg)
+
+            (
+                best_index,
+                selection_score
+            ) = self.select_best_trajectory(
+                horizon_realism_score,
+                sequence_realism_score,
+                alpha=alpha,
+                horizon_agg=horizon_agg
+            )
+
         elif selection == "sequence_only":
-            best_index = int(np.argmax(sequence_realism_score))
-            selection_score = sequence_realism_score
+
+            best_index = int(
+                np.argmax(
+                    sequence_realism_score
+                )
+            )
+
+            selection_score = (
+                sequence_realism_score
+            )
+
         elif selection == "neural_selection":
-            best_index, selection_score = self.neural_selection(context, sequences, horizon_realism_score, sequence_realism_score)
+
+            (
+                best_index,
+                selection_score
+            ) = self.neural_selection(
+                context,
+                sequences,
+                horizon_realism_score,
+                sequence_realism_score
+            )
+
         else:
-            raise ValueError("selection must be one of: 'composite', 'sequence_only', 'neural_selection'")
+
+            raise ValueError(
+                "selection must be one of: "
+                "'composite', "
+                "'sequence_only', "
+                "'neural_selection'"
+            )
 
         return {
+            "stock": (
+                self.stock_names[
+                    self._resolve_stock_id(stock)
+                ]
+            ),
+
+            "stock_id": (
+                self._resolve_stock_id(stock)
+            ),
+
             "all_sequences": sequences,
-            "residual_sequences": residual_futures,
+
+            "residual_sequences": (
+                residual_futures
+            ),
+
             "trend": trend_future,
-            "horizon_realism_score": horizon_realism_score,
-            "sequence_realism_score": sequence_realism_score,
-            "selection_score": selection_score,
-            "composite_score": selection_score,
+
+            "horizon_realism_score": (
+                horizon_realism_score
+            ),
+
+            "sequence_realism_score": (
+                sequence_realism_score
+            ),
+
+            "selection_score": (
+                selection_score
+            ),
+
+            "composite_score": (
+                selection_score
+            ),
+
             "best_index": best_index,
-            "best_sequence": sequences[:, best_index],
-            "best_residual": residual_futures[:, best_index],
-            "best_horizon_realism_score": horizon_realism_score[:, best_index],
-            "best_sequence_realism_score": sequence_realism_score[best_index],
+
+            "best_sequence": (
+                sequences[:, best_index]
+            ),
+
+            "best_residual": (
+                residual_futures[
+                    :, best_index
+                ]
+            ),
+
+            "best_horizon_realism_score": (
+                horizon_realism_score[
+                    :, best_index
+                ]
+            ),
+
+            "best_sequence_realism_score": (
+                sequence_realism_score[
+                    best_index
+                ]
+            )
         }
 
     # ================================================================
     # BACKTEST
     # ================================================================
 
-    def backtest(self, n_sequences=100, return_all_sequences=True, selection="composite", alpha=0.5, horizon_agg="min"):
+    def backtest(
+        self,
+        n_sequences=100,
+        return_all_sequences=True,
+        selection="composite",
+        alpha=0.5,
+        horizon_agg="min"
+    ):
         """
-        Chronological backtest. Everything returned here is in ORIGINAL
-        temperature units.
+        Backtest across ALL stocks.
 
-        `all_sequences`: (n_test, horizon, n_sequences)
-        `predictions`: selected best trajectory (see `selection`,
-            `alpha`, `horizon_agg` -- passed through to `predict()`)
-        `trend`: causal local trend extrapolation
-        `residual_sequences`: generated residual ensemble
+        Every test sample retains its stock identity.
+
+        Output:
+
+            stock_ids
+            stock_names
+            contexts
+            predictions
+            actuals
+            trends
+            residual_sequences
+            realism scores
+            optionally all generated sequences
         """
-        all_contexts, all_predictions = [], []
-        all_horizon_realism_scores, all_sequence_realism_scores = [], []
-        all_actuals, all_trends, all_residuals = [], [], []
-        all_ensembles = [] if return_all_sequences else None
 
-        for i in range(len(self.raw_contexts_test)):
-            context_raw = self.raw_contexts_test[i]
-            actual_raw = self.raw_targets_test[i]
-            result = self.predict(context_raw, n_sequences, selection=selection, alpha=alpha, horizon_agg=horizon_agg)
+        all_contexts = []
+        all_predictions = []
 
-            all_contexts.append(context_raw)
-            all_predictions.append(result["best_sequence"])
-            all_horizon_realism_scores.append(result["best_horizon_realism_score"])
-            all_sequence_realism_scores.append(result["best_sequence_realism_score"])
-            all_actuals.append(actual_raw)
-            all_trends.append(result["trend"])
-            all_residuals.append(result["residual_sequences"])
+        all_horizon_realism_scores = []
+        all_sequence_realism_scores = []
+
+        all_actuals = []
+        all_trends = []
+        all_residuals = []
+
+        all_stock_ids = []
+        all_stock_names = []
+
+        all_ensembles = (
+            []
+            if return_all_sequences
+            else None
+        )
+
+        for i in range(
+            len(self.raw_contexts_test)
+        ):
+
+            context_raw = (
+                self.raw_contexts_test[i]
+            )
+
+            actual_raw = (
+                self.raw_targets_test[i]
+            )
+
+            stock_id = int(
+                self.stock_ids_test[i]
+            )
+
+            stock_name = (
+                self.id_to_stock[
+                    stock_id
+                ]
+            )
+
+            result = self.predict(
+                context=context_raw,
+                stock=stock_id,
+                n_sequences=n_sequences,
+                selection=selection,
+                alpha=alpha,
+                horizon_agg=horizon_agg
+            )
+
+            all_contexts.append(
+                context_raw
+            )
+
+            all_predictions.append(
+                result["best_sequence"]
+            )
+
+            all_horizon_realism_scores.append(
+                result[
+                    "best_horizon_realism_score"
+                ]
+            )
+
+            all_sequence_realism_scores.append(
+                result[
+                    "best_sequence_realism_score"
+                ]
+            )
+
+            all_actuals.append(
+                actual_raw
+            )
+
+            all_trends.append(
+                result["trend"]
+            )
+
+            all_residuals.append(
+                result["residual_sequences"]
+            )
+
+            all_stock_ids.append(
+                stock_id
+            )
+
+            all_stock_names.append(
+                stock_name
+            )
+
             if return_all_sequences:
-                all_ensembles.append(result["all_sequences"])
+
+                all_ensembles.append(
+                    result["all_sequences"]
+                )
 
         output = {
-            "contexts": np.asarray(all_contexts, dtype=np.float32),
-            "predictions": np.asarray(all_predictions, dtype=np.float32),
-            "horizon_realism_score": np.asarray(all_horizon_realism_scores, dtype=np.float32),
-            "sequence_realism_score": np.asarray(all_sequence_realism_scores, dtype=np.float32),
-            "actuals": np.asarray(all_actuals, dtype=np.float32),
-            "trend": np.asarray(all_trends, dtype=np.float32),
-            "residual_sequences": np.asarray(all_residuals, dtype=np.float32),
+
+            "stock_ids": np.asarray(
+                all_stock_ids,
+                dtype=np.int64
+            ),
+
+            "stock_names": np.asarray(
+                all_stock_names
+            ),
+
+            "contexts": np.asarray(
+                all_contexts,
+                dtype=np.float32
+            ),
+
+            "predictions": np.asarray(
+                all_predictions,
+                dtype=np.float32
+            ),
+
+            "horizon_realism_score": np.asarray(
+                all_horizon_realism_scores,
+                dtype=np.float32
+            ),
+
+            "sequence_realism_score": np.asarray(
+                all_sequence_realism_scores,
+                dtype=np.float32
+            ),
+
+            "actuals": np.asarray(
+                all_actuals,
+                dtype=np.float32
+            ),
+
+            "trend": np.asarray(
+                all_trends,
+                dtype=np.float32
+            ),
+
+            "residual_sequences": np.asarray(
+                all_residuals,
+                dtype=np.float32
+            )
         }
 
         if return_all_sequences:
-            output["all_sequences"] = np.asarray(all_ensembles, dtype=np.float32)
+
+            output[
+                "all_sequences"
+            ] = np.asarray(
+                all_ensembles,
+                dtype=np.float32
+            )
 
         return output
 
     # ================================================================
-    # POINT METRICS
+    # PER-STOCK BACKTEST
     # ================================================================
 
-    def metrics(self, predictions=None, actuals=None, mape_zero_threshold=None):
+    def backtest_by_stock(
+        self,
+        n_sequences=100,
+        return_all_sequences=True,
+        selection="composite",
+        alpha=0.5,
+        horizon_agg="min"
+    ):
+        """
+        Run backtest and return results separated by stock.
+        """
+
+        results = {}
+
+        for stock_name, stock_id in self.stock_to_id.items():
+
+            indices = np.where(
+                self.stock_ids_test == stock_id
+            )[0]
+
+            predictions = []
+            actuals = []
+            contexts = []
+            trends = []
+            residual_sequences = []
+            horizon_scores = []
+            sequence_scores = []
+            ensembles = []
+
+            for i in indices:
+
+                context = (
+                    self.raw_contexts_test[i]
+                )
+
+                actual = (
+                    self.raw_targets_test[i]
+                )
+
+                result = self.predict(
+                    context=context,
+                    stock=stock_id,
+                    n_sequences=n_sequences,
+                    selection=selection,
+                    alpha=alpha,
+                    horizon_agg=horizon_agg
+                )
+
+                contexts.append(
+                    context
+                )
+
+                predictions.append(
+                    result["best_sequence"]
+                )
+
+                actuals.append(
+                    actual
+                )
+
+                trends.append(
+                    result["trend"]
+                )
+
+                residual_sequences.append(
+                    result["residual_sequences"]
+                )
+
+                horizon_scores.append(
+                    result[
+                        "best_horizon_realism_score"
+                    ]
+                )
+
+                sequence_scores.append(
+                    result[
+                        "best_sequence_realism_score"
+                    ]
+                )
+
+                if return_all_sequences:
+
+                    ensembles.append(
+                        result[
+                            "all_sequences"
+                        ]
+                    )
+
+            results[stock_name] = {
+
+                "stock_id": stock_id,
+
+                "contexts": np.asarray(
+                    contexts,
+                    dtype=np.float32
+                ),
+
+                "predictions": np.asarray(
+                    predictions,
+                    dtype=np.float32
+                ),
+
+                "actuals": np.asarray(
+                    actuals,
+                    dtype=np.float32
+                ),
+
+                "trend": np.asarray(
+                    trends,
+                    dtype=np.float32
+                ),
+
+                "residual_sequences": np.asarray(
+                    residual_sequences,
+                    dtype=np.float32
+                ),
+
+                "horizon_realism_score": np.asarray(
+                    horizon_scores,
+                    dtype=np.float32
+                ),
+
+                "sequence_realism_score": np.asarray(
+                    sequence_scores,
+                    dtype=np.float32
+                )
+            }
+
+            if return_all_sequences:
+
+                results[stock_name][
+                    "all_sequences"
+                ] = np.asarray(
+                    ensembles,
+                    dtype=np.float32
+                )
+
+        return results
+
+    # ================================================================
+    # METRICS
+    # ================================================================
+
+    def metrics(
+        self,
+        predictions=None,
+        actuals=None,
+        mape_zero_threshold=None
+    ):
+
         if predictions is None or actuals is None:
-            raise ValueError("metrics() requires predictions and actuals.")
 
-        threshold = self.mape_zero_threshold if mape_zero_threshold is None else mape_zero_threshold
-        predictions, actuals = np.asarray(predictions, dtype=np.float32), np.asarray(actuals, dtype=np.float32)
-        error = predictions - actuals
+            raise ValueError(
+                "metrics() requires "
+                "predictions and actuals."
+            )
 
-        mae = float(np.mean(np.abs(error)))
-        rmse = float(np.sqrt(np.mean(error ** 2)))
+        threshold = (
+            self.mape_zero_threshold
+            if mape_zero_threshold is None
+            else mape_zero_threshold
+        )
 
-        valid_mask = np.abs(actuals) >= threshold
-        mape = float(np.mean(np.abs(error[valid_mask]) / np.abs(actuals[valid_mask])) * 100) if valid_mask.sum() > 0 else float("nan")
-        mape_excluded_fraction = float(1.0 - valid_mask.mean())
+        predictions = np.asarray(
+            predictions,
+            dtype=np.float32
+        )
 
-        ss_res = np.sum(error ** 2)
-        ss_tot = np.sum((actuals - np.mean(actuals)) ** 2)
-        r2 = float(1.0 - ss_res / max(ss_tot, 1e-12))
+        actuals = np.asarray(
+            actuals,
+            dtype=np.float32
+        )
 
-        result = {"overall": {"MAE": mae, "RMSE": rmse, "MAPE": mape, "MAPE_excluded_fraction": mape_excluded_fraction, "R2": r2}, "per_horizon": {}}
+        error = (
+            predictions - actuals
+        )
 
-        for h in range(predictions.shape[1]):
-            p, a = predictions[:, h], actuals[:, h]
+        mae = float(
+            np.mean(
+                np.abs(error)
+            )
+        )
+
+        rmse = float(
+            np.sqrt(
+                np.mean(
+                    error ** 2
+                )
+            )
+        )
+
+        valid_mask = (
+            np.abs(actuals)
+            >= threshold
+        )
+
+        mape = (
+            float(
+                np.mean(
+                    np.abs(
+                        error[valid_mask]
+                    )
+                    / np.abs(
+                        actuals[valid_mask]
+                    )
+                )
+                * 100
+            )
+            if valid_mask.sum() > 0
+            else float("nan")
+        )
+
+        mape_excluded_fraction = float(
+            1.0 - valid_mask.mean()
+        )
+
+        ss_res = np.sum(
+            error ** 2
+        )
+
+        ss_tot = np.sum(
+            (
+                actuals
+                - np.mean(actuals)
+            ) ** 2
+        )
+
+        r2 = float(
+            1.0
+            - ss_res
+            / max(
+                ss_tot,
+                1e-12
+            )
+        )
+
+        result = {
+            "overall": {
+                "MAE": mae,
+                "RMSE": rmse,
+                "MAPE": mape,
+                "MAPE_excluded_fraction":
+                    mape_excluded_fraction,
+                "R2": r2
+            },
+
+            "per_horizon": {}
+        }
+
+        for h in range(
+            predictions.shape[1]
+        ):
+
+            p = predictions[:, h]
+            a = actuals[:, h]
+
             e = p - a
-            h_mae = float(np.mean(np.abs(e)))
-            h_rmse = float(np.sqrt(np.mean(e ** 2)))
-            h_valid = np.abs(a) >= threshold
-            h_mape = float(np.mean(np.abs(e[h_valid]) / np.abs(a[h_valid])) * 100) if h_valid.sum() > 0 else float("nan")
-            h_excluded_fraction = float(1.0 - h_valid.mean())
-            h_ss_res = np.sum(e ** 2)
-            h_ss_tot = np.sum((a - np.mean(a)) ** 2)
-            h_r2 = float(1.0 - h_ss_res / max(h_ss_tot, 1e-12))
-            result["per_horizon"][f"Day +{h+1}"] = {"MAE": h_mae, "RMSE": h_rmse, "MAPE": h_mape, "MAPE_excluded_fraction": h_excluded_fraction, "R2": h_r2}
+
+            h_mae = float(
+                np.mean(
+                    np.abs(e)
+                )
+            )
+
+            h_rmse = float(
+                np.sqrt(
+                    np.mean(
+                        e ** 2
+                    )
+                )
+            )
+
+            h_valid = (
+                np.abs(a)
+                >= threshold
+            )
+
+            h_mape = (
+                float(
+                    np.mean(
+                        np.abs(
+                            e[h_valid]
+                        )
+                        / np.abs(
+                            a[h_valid]
+                        )
+                    )
+                    * 100
+                )
+                if h_valid.sum() > 0
+                else float("nan")
+            )
+
+            h_excluded_fraction = float(
+                1.0 - h_valid.mean()
+            )
+
+            h_ss_res = np.sum(
+                e ** 2
+            )
+
+            h_ss_tot = np.sum(
+                (
+                    a - np.mean(a)
+                ) ** 2
+            )
+
+            h_r2 = float(
+                1.0
+                - h_ss_res
+                / max(
+                    h_ss_tot,
+                    1e-12
+                )
+            )
+
+            result[
+                "per_horizon"
+            ][
+                f"Day +{h + 1}"
+            ] = {
+
+                "MAE": h_mae,
+
+                "RMSE": h_rmse,
+
+                "MAPE": h_mape,
+
+                "MAPE_excluded_fraction":
+                    h_excluded_fraction,
+
+                "R2": h_r2
+            }
 
         return result
+
+    # ================================================================
+    # PER-STOCK METRICS
+    # ================================================================
+
+    def metrics_by_stock(
+        self,
+        backtest_output
+    ):
+        """
+        Calculate metrics separately for every stock.
+
+        This is particularly important for a multi-stock model because
+        aggregate metrics can hide large differences between stocks.
+        """
+
+        results = {}
+
+        for stock_name, result in backtest_output.items():
+
+            results[stock_name] = self.metrics(
+                predictions=result[
+                    "predictions"
+                ],
+                actuals=result[
+                    "actuals"
+                ]
+            )
+
+        return results
 
     # ================================================================
     # SMAPE
     # ================================================================
 
     @staticmethod
-    def smape(predictions, actuals):
-        predictions, actuals = np.asarray(predictions), np.asarray(actuals)
-        denominator = (np.abs(predictions) + np.abs(actuals)) / 2.0
-        denominator = np.where(denominator < 1e-8, 1e-8, denominator)
-        return float(np.mean(np.abs(predictions - actuals) / denominator) * 100)
+    def smape(
+        predictions,
+        actuals
+    ):
+
+        predictions = np.asarray(
+            predictions
+        )
+
+        actuals = np.asarray(
+            actuals
+        )
+
+        denominator = (
+            np.abs(predictions)
+            + np.abs(actuals)
+        ) / 2.0
+
+        denominator = np.where(
+            denominator < 1e-8,
+            1e-8,
+            denominator
+        )
+
+        return float(
+            np.mean(
+                np.abs(
+                    predictions - actuals
+                )
+                / denominator
+            )
+            * 100
+        )
 
     # ================================================================
     # NAIVE PERSISTENCE BASELINE
     # ================================================================
 
     @staticmethod
-    def naive_persistence_baseline(contexts, horizon):
-        contexts = np.asarray(contexts)
-        return np.repeat(contexts[:, -1:], horizon, axis=1)
+    def naive_persistence_baseline(
+        contexts,
+        horizon
+    ):
+
+        contexts = np.asarray(
+            contexts
+        )
+
+        return np.repeat(
+            contexts[:, -1:],
+            horizon,
+            axis=1
+        )
 
     # ================================================================
     # PROBABILISTIC METRICS: CRPS
     # ================================================================
 
     @staticmethod
-    def probabilistic_metrics(all_sequences, actuals):
-        """
-        Sample-estimator CRPS.
+    def probabilistic_metrics(
+        all_sequences,
+        actuals
+    ):
 
-        all_sequences: (n_test, horizon, n_sequences)
-        actuals: (n_test, horizon)
-        All values must be in ORIGINAL temperature units.
+        all_sequences = np.asarray(
+            all_sequences,
+            dtype=np.float64
+        )
 
-        FIX: the pairwise |ensemble_i - ensemble_j| term (`term2`) is
-        averaged over n*(n-1) off-diagonal pairs, not n^2 -- the original
-        code included the n zero-valued diagonal terms (i == j) in the
-        average, which biases the CRPS estimate low (the bias shrinks as
-        n_sequences grows, but is nonzero for any finite ensemble).
-        """
-        all_sequences = np.asarray(all_sequences, dtype=np.float64)
-        actuals = np.asarray(actuals, dtype=np.float64)
-        n_test, horizon, n_sequences = all_sequences.shape
-        if actuals.shape != (n_test, horizon):
-            raise ValueError(f"actuals must have shape ({n_test}, {horizon})")
+        actuals = np.asarray(
+            actuals,
+            dtype=np.float64
+        )
 
-        crps_per_horizon = np.zeros(horizon, dtype=np.float64)
+        n_test, horizon, n_sequences = (
+            all_sequences.shape
+        )
+
+        if actuals.shape != (
+            n_test,
+            horizon
+        ):
+
+            raise ValueError(
+                f"actuals must have shape "
+                f"({n_test}, {horizon})"
+            )
+
+        crps_per_horizon = np.zeros(
+            horizon,
+            dtype=np.float64
+        )
 
         for h in range(horizon):
-            crps_values = np.zeros(n_test, dtype=np.float64)
-            for t in range(n_test):
-                ensemble = all_sequences[t, h, :]
-                y = actuals[t, h]
-                term1 = np.mean(np.abs(ensemble - y))
-                pairwise_diff = np.abs(ensemble[:, None] - ensemble[None, :])
-                term2 = pairwise_diff.sum() / (2.0 * n_sequences * (n_sequences - 1)) if n_sequences > 1 else 0.0
-                crps_values[t] = term1 - term2
-            crps_per_horizon[h] = np.mean(crps_values)
 
-        return {"overall_CRPS": float(np.mean(crps_per_horizon)), "per_horizon_CRPS": {f"Day +{h+1}": float(crps_per_horizon[h]) for h in range(horizon)}}
+            crps_values = np.zeros(
+                n_test,
+                dtype=np.float64
+            )
+
+            for t in range(n_test):
+
+                ensemble = (
+                    all_sequences[
+                        t, h, :
+                    ]
+                )
+
+                y = actuals[
+                    t, h
+                ]
+
+                term1 = np.mean(
+                    np.abs(
+                        ensemble - y
+                    )
+                )
+
+                pairwise_diff = np.abs(
+                    ensemble[:, None]
+                    - ensemble[None, :]
+                )
+
+                term2 = (
+                    pairwise_diff.sum()
+                    / (
+                        2.0
+                        * n_sequences
+                        * (n_sequences - 1)
+                    )
+                    if n_sequences > 1
+                    else 0.0
+                )
+
+                crps_values[t] = (
+                    term1 - term2
+                )
+
+            crps_per_horizon[h] = (
+                np.mean(
+                    crps_values
+                )
+            )
+
+        return {
+            "overall_CRPS": float(
+                np.mean(
+                    crps_per_horizon
+                )
+            ),
+
+            "per_horizon_CRPS": {
+                f"Day +{h + 1}":
+                    float(
+                        crps_per_horizon[h]
+                    )
+                for h in range(horizon)
+            }
+        }
 
     # ================================================================
     # PREDICTION INTERVAL METRICS
     # ================================================================
 
     @staticmethod
-    def prediction_interval_metrics(all_sequences, actuals, confidence=0.9):
-        all_sequences, actuals = np.asarray(all_sequences), np.asarray(actuals)
+    def prediction_interval_metrics(
+        all_sequences,
+        actuals,
+        confidence=0.9
+    ):
+
+        all_sequences = np.asarray(
+            all_sequences
+        )
+
+        actuals = np.asarray(
+            actuals
+        )
+
         if all_sequences.ndim != 3:
-            raise ValueError("all_sequences must have shape (n_test, horizon, n_sequences)")
 
-        n_test, horizon, n_sequences = all_sequences.shape
-        if actuals.shape != (n_test, horizon):
-            raise ValueError("actuals shape does not match all_sequences")
+            raise ValueError(
+                "all_sequences must have "
+                "shape "
+                "(n_test, horizon, n_sequences)"
+            )
 
-        alpha = 1.0 - confidence
-        lower_q, upper_q = alpha / 2.0, 1.0 - alpha / 2.0
-        lower = np.quantile(all_sequences, lower_q, axis=2)
-        upper = np.quantile(all_sequences, upper_q, axis=2)
-        inside = (actuals >= lower) & (actuals <= upper)
-        width = upper - lower
-        picp_per_horizon = inside.mean(axis=0)
-        piw_per_horizon = width.mean(axis=0)
+        n_test, horizon, n_sequences = (
+            all_sequences.shape
+        )
+
+        if actuals.shape != (
+            n_test,
+            horizon
+        ):
+
+            raise ValueError(
+                "actuals shape does not "
+                "match all_sequences"
+            )
+
+        alpha = (
+            1.0 - confidence
+        )
+
+        lower_q = (
+            alpha / 2.0
+        )
+
+        upper_q = (
+            1.0 - alpha / 2.0
+        )
+
+        lower = np.quantile(
+            all_sequences,
+            lower_q,
+            axis=2
+        )
+
+        upper = np.quantile(
+            all_sequences,
+            upper_q,
+            axis=2
+        )
+
+        inside = (
+            (actuals >= lower)
+            & (actuals <= upper)
+        )
+
+        width = (
+            upper - lower
+        )
+
+        picp_per_horizon = (
+            inside.mean(axis=0)
+        )
+
+        piw_per_horizon = (
+            width.mean(axis=0)
+        )
 
         return {
-            "confidence_level": confidence,
-            "overall_PICP": float(inside.mean()),
-            "overall_PIW": float(width.mean()),
-            "per_horizon_PICP": {f"Day +{h+1}": float(picp_per_horizon[h]) for h in range(horizon)},
-            "per_horizon_PIW": {f"Day +{h+1}": float(piw_per_horizon[h]) for h in range(horizon)},
+
+            "confidence_level":
+                confidence,
+
+            "overall_PICP":
+                float(
+                    inside.mean()
+                ),
+
+            "overall_PIW":
+                float(
+                    width.mean()
+                ),
+
+            "per_horizon_PICP": {
+                f"Day +{h + 1}":
+                    float(
+                        picp_per_horizon[h]
+                    )
+                for h in range(horizon)
+            },
+
+            "per_horizon_PIW": {
+                f"Day +{h + 1}":
+                    float(
+                        piw_per_horizon[h]
+                    )
+                for h in range(horizon)
+            }
         }
 
     # ================================================================
@@ -2124,44 +4772,243 @@ class MultiSequenceGAN:
     # ================================================================
 
     @staticmethod
-    def calibration_curve(all_sequences, actuals, confidence_levels=(0.5, 0.6, 0.7, 0.8, 0.9, 0.95)):
+    def calibration_curve(
+        all_sequences,
+        actuals,
+        confidence_levels=(
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            0.95
+        )
+    ):
+
         curve = []
+
         for level in confidence_levels:
-            result = MultiSequenceGAN.prediction_interval_metrics(all_sequences, actuals, confidence=level)
-            curve.append({"nominal_confidence": level, "empirical_PICP": result["overall_PICP"], "gap": (result["overall_PICP"] - level), "PIW": result["overall_PIW"]})
+
+            result = (
+                MultiSequenceGAN
+                .prediction_interval_metrics(
+                    all_sequences,
+                    actuals,
+                    confidence=level
+                )
+            )
+
+            curve.append({
+
+                "nominal_confidence":
+                    level,
+
+                "empirical_PICP":
+                    result[
+                        "overall_PICP"
+                    ],
+
+                "gap":
+                    (
+                        result[
+                            "overall_PICP"
+                        ]
+                        - level
+                    ),
+
+                "PIW":
+                    result[
+                        "overall_PIW"
+                    ]
+            })
+
         return curve
 
     # ================================================================
     # MODEL C DIAGNOSTICS
     # ================================================================
 
-    def decomposition_diagnostics(self, n_examples=5):
+    def decomposition_diagnostics(
+        self,
+        n_examples=5,
+        stock=None
+    ):
         """
-        Print a few causal trend/residual decompositions from the test set.
-        Useful for verifying that Model C is actually learning residuals.
+        Print causal trend/residual decompositions.
+
+        If `stock` is provided, only examples from that stock
+        are displayed.
         """
-        n_examples = min(n_examples, len(self.contexts_raw_test))
 
-        for i in range(n_examples):
-            context = self.raw_contexts_test[i]
-            actual = self.raw_targets_test[i]
-            trend_context = self.trend_contexts_test[i]
-            trend_future = self.trend_futures_test[i]
-            context_residual = context - trend_context
-            future_residual = actual - trend_future
+        if stock is None:
 
-            print(f"\nExample {i}")
-            print("Context:", np.round(context, 4))
-            print("Historical trend:", np.round(trend_context, 4))
-            print("Context residual:", np.round(context_residual, 4))
-            print("Future trend:", np.round(trend_future, 4))
-            print("Actual future:", np.round(actual, 4))
-            print("Actual future residual:", np.round(future_residual, 4))
-            print("Local slope:", float(self.slopes_test[i]))
+            indices = np.arange(
+                len(
+                    self.contexts_raw_test
+                )
+            )
+
+        else:
+
+            stock_id = (
+                self._resolve_stock_id(
+                    stock
+                )
+            )
+
+            indices = np.where(
+                self.stock_ids_test
+                == stock_id
+            )[0]
+
+        indices = indices[
+            :min(
+                n_examples,
+                len(indices)
+            )
+        ]
+
+        for example_number, i in enumerate(
+            indices
+        ):
+
+            context = (
+                self.raw_contexts_test[i]
+            )
+
+            actual = (
+                self.raw_targets_test[i]
+            )
+
+            trend_context = (
+                self.trend_contexts_test[i]
+            )
+
+            trend_future = (
+                self.trend_futures_test[i]
+            )
+
+            context_residual = (
+                context
+                - trend_context
+            )
+
+            future_residual = (
+                actual
+                - trend_future
+            )
+
+            stock_id = int(
+                self.stock_ids_test[i]
+            )
+
+            stock_name = (
+                self.id_to_stock[
+                    stock_id
+                ]
+            )
+
+            print(
+                f"\nExample {example_number}"
+            )
+
+            print(
+                "Stock:",
+                stock_name
+            )
+
+            print(
+                "Context:",
+                np.round(
+                    context,
+                    4
+                )
+            )
+
+            print(
+                "Historical trend:",
+                np.round(
+                    trend_context,
+                    4
+                )
+            )
+
+            print(
+                "Context residual:",
+                np.round(
+                    context_residual,
+                    4
+                )
+            )
+
+            print(
+                "Future trend:",
+                np.round(
+                    trend_future,
+                    4
+                )
+            )
+
+            print(
+                "Actual future:",
+                np.round(
+                    actual,
+                    4
+                )
+            )
+
+            print(
+                "Actual future residual:",
+                np.round(
+                    future_residual,
+                    4
+                )
+            )
+
+            print(
+                "Local slope:",
+                float(
+                    self.slopes_test[i]
+                )
+            )
 
         return {
-            "contexts": self.contexts_raw_test[:n_examples],
-            "historical_trends": self.trend_contexts_test[:n_examples],
-            "future_trends": self.trend_futures_test[:n_examples],
-            "slopes": self.slopes_test[:n_examples],
+
+            "contexts":
+                self.raw_contexts_test[
+                    indices
+                ],
+
+            "historical_trends":
+                self.trend_contexts_test[
+                    indices
+                ],
+
+            "future_trends":
+                self.trend_futures_test[
+                    indices
+                ],
+
+            "slopes":
+                self.slopes_test[
+                    indices
+                ],
+
+            "stock_ids":
+                self.stock_ids_test[
+                    indices
+                ],
+
+            "stock_names":
+                np.asarray(
+                    [
+                        self.id_to_stock[
+                            int(s)
+                        ]
+                        for s in
+                        self.stock_ids_test[
+                            indices
+                        ]
+                    ]
+                )
         }
