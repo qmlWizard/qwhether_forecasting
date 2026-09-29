@@ -1,0 +1,14 @@
+{
+  "batch_size": 64,
+  "data_mode": "univariate",
+  "hidden_size": 128,
+  "latent_size": 16,
+  "learning_rate": 1.1705095110871111e-05,
+  "model_class": "QGanModel",
+  "n_qubits": 4,
+  "quantum_layers": 2,
+  "recon_loss_weight": 1.6652387581725738,
+  "stock_embedding_dim": 16,
+  "training_mode": "combined",
+  "variety_k": 3
+}

@@ -1,0 +1,457 @@
+trial_id,model,training_mode,data_mode,record_type,metric_scope,epoch,metric_name,metric_value,fixed_horizon,prediction_horizon,stocks,n_stocks,target_source,variable_source,arg_data,arg_target,arg_variables,arg_type,arg_historical_lookup,arg_horizon,arg_latent_size,arg_n_qubits,arg_quantum_layers,arg_hidden_size,arg_epochs,arg_batch_size,arg_learning_rate,arg_train_ratio,arg_training_mode,arg_data_mode,arg_stock_embedding_dim,arg_variety_k,arg_recon_loss_weight,arg_seed,arg_device,arg_lag,arg_n_samples,arg_shots
+b1975_00000,QGanModel,per_stock,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,128,50,64,0.0006780824427837,0.8,per_stock,univariate,8,10,2.6033289234245465,42,,0,100,
+b1975_00000,QGanModel,per_stock,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,128,50,64,0.0006780824427837,0.8,per_stock,univariate,8,10,2.6033289234245465,42,,0,100,
+b1975_00000,QGanModel,per_stock,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,128,50,64,0.0006780824427837,0.8,per_stock,univariate,8,10,2.6033289234245465,42,,0,100,
+b1975_00000,QGanModel,per_stock,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,128,50,64,0.0006780824427837,0.8,per_stock,univariate,8,10,2.6033289234245465,42,,0,100,
+b1975_00001,MultiSequenceGAN,per_stock,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2235, in train
+    child.train()
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,32,50,32,3.839823252778472e-05,0.8,per_stock,univariate,8,10,0.1139601227242672,42,,0,100,
+b1975_00001,MultiSequenceGAN,per_stock,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,32,50,32,3.839823252778472e-05,0.8,per_stock,univariate,8,10,0.1139601227242672,42,,0,100,
+b1975_00001,MultiSequenceGAN,per_stock,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,32,50,32,3.839823252778472e-05,0.8,per_stock,univariate,8,10,0.1139601227242672,42,,0,100,
+b1975_00001,MultiSequenceGAN,per_stock,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,32,50,32,3.839823252778472e-05,0.8,per_stock,univariate,8,10,0.1139601227242672,42,,0,100,
+b1975_00002,QGanModel,combined,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,128,50,64,1.1705095110871113e-05,0.8,combined,univariate,16,3,1.6652387581725738,42,,0,100,
+b1975_00002,QGanModel,combined,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,128,50,64,1.1705095110871113e-05,0.8,combined,univariate,16,3,1.6652387581725738,42,,0,100,
+b1975_00002,QGanModel,combined,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,128,50,64,1.1705095110871113e-05,0.8,combined,univariate,16,3,1.6652387581725738,42,,0,100,
+b1975_00002,QGanModel,combined,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,2,128,50,64,1.1705095110871113e-05,0.8,combined,univariate,16,3,1.6652387581725738,42,,0,100,
+b1975_00003,MultiSequenceGAN,combined,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [64, 30] at entry 0 and [64, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [64, 30] at entry 0 and [64, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,32,50,64,5.623203596594529e-05,0.8,combined,univariate,8,10,0.5041790086318563,42,,0,100,
+b1975_00003,MultiSequenceGAN,combined,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,32,50,64,5.623203596594529e-05,0.8,combined,univariate,8,10,0.5041790086318563,42,,0,100,
+b1975_00003,MultiSequenceGAN,combined,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,32,50,64,5.623203596594529e-05,0.8,combined,univariate,8,10,0.5041790086318563,42,,0,100,
+b1975_00003,MultiSequenceGAN,combined,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,32,50,64,5.623203596594529e-05,0.8,combined,univariate,8,10,0.5041790086318563,42,,0,100,
+b1975_00004,QGanModel,stock_id,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,1,128,50,16,0.0001124752401121,0.8,stock_id,univariate,16,10,4.207549942839987,42,,0,100,
+b1975_00004,QGanModel,stock_id,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,1,128,50,16,0.0001124752401121,0.8,stock_id,univariate,16,10,4.207549942839987,42,,0,100,
+b1975_00004,QGanModel,stock_id,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,1,128,50,16,0.0001124752401121,0.8,stock_id,univariate,16,10,4.207549942839987,42,,0,100,
+b1975_00004,QGanModel,stock_id,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,1,128,50,16,0.0001124752401121,0.8,stock_id,univariate,16,10,4.207549942839987,42,,0,100,
+b1975_00005,MultiSequenceGAN,stock_id,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,1,64,50,32,0.0028941806925047,0.8,stock_id,univariate,16,3,2.9382728585393885,42,,0,100,
+b1975_00005,MultiSequenceGAN,stock_id,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,1,64,50,32,0.0028941806925047,0.8,stock_id,univariate,16,3,2.9382728585393885,42,,0,100,
+b1975_00005,MultiSequenceGAN,stock_id,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,1,64,50,32,0.0028941806925047,0.8,stock_id,univariate,16,3,2.9382728585393885,42,,0,100,
+b1975_00005,MultiSequenceGAN,stock_id,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,1,64,50,32,0.0028941806925047,0.8,stock_id,univariate,16,3,2.9382728585393885,42,,0,100,
+b1975_00006,QGanModel,per_stock,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,4,32,50,16,2.2344819141818244e-05,0.8,per_stock,univariate,8,3,0.0451688251790177,42,,0,100,
+b1975_00006,QGanModel,per_stock,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,4,32,50,16,2.2344819141818244e-05,0.8,per_stock,univariate,8,3,0.0451688251790177,42,,0,100,
+b1975_00006,QGanModel,per_stock,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,4,32,50,16,2.2344819141818244e-05,0.8,per_stock,univariate,8,3,0.0451688251790177,42,,0,100,
+b1975_00006,QGanModel,per_stock,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,4,32,50,16,2.2344819141818244e-05,0.8,per_stock,univariate,8,3,0.0451688251790177,42,,0,100,
+b1975_00007,MultiSequenceGAN,per_stock,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [64, 30] at entry 0 and [64, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2235, in train
+    child.train()
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [64, 30] at entry 0 and [64, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,32,50,64,0.0002955023911234,0.8,per_stock,univariate,8,5,0.3481727116679459,42,,0,100,
+b1975_00007,MultiSequenceGAN,per_stock,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,32,50,64,0.0002955023911234,0.8,per_stock,univariate,8,5,0.3481727116679459,42,,0,100,
+b1975_00007,MultiSequenceGAN,per_stock,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,32,50,64,0.0002955023911234,0.8,per_stock,univariate,8,5,0.3481727116679459,42,,0,100,
+b1975_00007,MultiSequenceGAN,per_stock,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,4,32,50,64,0.0002955023911234,0.8,per_stock,univariate,8,5,0.3481727116679459,42,,0,100,
+b1975_00008,QGanModel,combined,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,8,2,128,50,64,0.0043567470682947,0.8,combined,univariate,16,5,0.062243844017126,42,,0,100,
+b1975_00008,QGanModel,combined,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,8,2,128,50,64,0.0043567470682947,0.8,combined,univariate,16,5,0.062243844017126,42,,0,100,
+b1975_00008,QGanModel,combined,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,8,2,128,50,64,0.0043567470682947,0.8,combined,univariate,16,5,0.062243844017126,42,,0,100,
+b1975_00008,QGanModel,combined,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,8,2,128,50,64,0.0043567470682947,0.8,combined,univariate,16,5,0.062243844017126,42,,0,100,
+b1975_00009,MultiSequenceGAN,combined,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,32,50,32,0.0001992805486309,0.8,combined,univariate,8,5,0.0392391509716039,42,,0,100,
+b1975_00009,MultiSequenceGAN,combined,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,32,50,32,0.0001992805486309,0.8,combined,univariate,8,5,0.0392391509716039,42,,0,100,
+b1975_00009,MultiSequenceGAN,combined,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,32,50,32,0.0001992805486309,0.8,combined,univariate,8,5,0.0392391509716039,42,,0,100,
+b1975_00009,MultiSequenceGAN,combined,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,32,50,32,0.0001992805486309,0.8,combined,univariate,8,5,0.0392391509716039,42,,0,100,
+b1975_00010,QGanModel,stock_id,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0021617535080995,0.8,stock_id,univariate,8,10,0.031863424657889,42,,0,100,
+b1975_00010,QGanModel,stock_id,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0021617535080995,0.8,stock_id,univariate,8,10,0.031863424657889,42,,0,100,
+b1975_00010,QGanModel,stock_id,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0021617535080995,0.8,stock_id,univariate,8,10,0.031863424657889,42,,0,100,
+b1975_00010,QGanModel,stock_id,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0021617535080995,0.8,stock_id,univariate,8,10,0.031863424657889,42,,0,100,
+b1975_00011,MultiSequenceGAN,stock_id,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [16, 30] at entry 0 and [16, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [16, 30] at entry 0 and [16, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,64,50,16,3.056477792221049e-05,0.8,stock_id,univariate,8,10,0.6020381472251636,42,,0,100,
+b1975_00011,MultiSequenceGAN,stock_id,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,64,50,16,3.056477792221049e-05,0.8,stock_id,univariate,8,10,0.6020381472251636,42,,0,100,
+b1975_00011,MultiSequenceGAN,stock_id,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,64,50,16,3.056477792221049e-05,0.8,stock_id,univariate,8,10,0.6020381472251636,42,,0,100,
+b1975_00011,MultiSequenceGAN,stock_id,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,4,4,64,50,16,3.056477792221049e-05,0.8,stock_id,univariate,8,10,0.6020381472251636,42,,0,100,
+b1975_00012,QGanModel,per_stock,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0004111144443099,0.8,per_stock,univariate,16,5,0.1357917020893773,42,,0,100,
+b1975_00012,QGanModel,per_stock,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0004111144443099,0.8,per_stock,univariate,16,5,0.1357917020893773,42,,0,100,
+b1975_00012,QGanModel,per_stock,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0004111144443099,0.8,per_stock,univariate,16,5,0.1357917020893773,42,,0,100,
+b1975_00012,QGanModel,per_stock,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,2,64,50,16,0.0004111144443099,0.8,per_stock,univariate,16,5,0.1357917020893773,42,,0,100,
+b1975_00013,MultiSequenceGAN,per_stock,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2235, in train
+    child.train()
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [32, 30] at entry 0 and [32, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,1,32,50,32,0.0018558698335033,0.8,per_stock,univariate,8,3,0.0730929364318114,42,,0,100,
+b1975_00013,MultiSequenceGAN,per_stock,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,1,32,50,32,0.0018558698335033,0.8,per_stock,univariate,8,3,0.0730929364318114,42,,0,100,
+b1975_00013,MultiSequenceGAN,per_stock,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,1,32,50,32,0.0018558698335033,0.8,per_stock,univariate,8,3,0.0730929364318114,42,,0,100,
+b1975_00013,MultiSequenceGAN,per_stock,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,1,32,50,32,0.0018558698335033,0.8,per_stock,univariate,8,3,0.0730929364318114,42,,0,100,
+b1975_00014,QGanModel,combined,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,4,32,50,32,0.0030485611597184,0.8,combined,univariate,4,10,0.3100811694220678,42,,0,100,
+b1975_00014,QGanModel,combined,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,4,32,50,32,0.0030485611597184,0.8,combined,univariate,4,10,0.3100811694220678,42,,0,100,
+b1975_00014,QGanModel,combined,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,4,32,50,32,0.0030485611597184,0.8,combined,univariate,4,10,0.3100811694220678,42,,0,100,
+b1975_00014,QGanModel,combined,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,4,4,4,32,50,32,0.0030485611597184,0.8,combined,univariate,4,10,0.3100811694220678,42,,0,100,
+b1975_00015,MultiSequenceGAN,combined,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [16, 30] at entry 0 and [16, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [16, 30] at entry 0 and [16, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,8,1,64,50,16,4.47868761245845e-05,0.8,combined,univariate,16,10,0.4626671287867203,42,,0,100,
+b1975_00015,MultiSequenceGAN,combined,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,8,1,64,50,16,4.47868761245845e-05,0.8,combined,univariate,16,10,0.4626671287867203,42,,0,100,
+b1975_00015,MultiSequenceGAN,combined,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,8,1,64,50,16,4.47868761245845e-05,0.8,combined,univariate,16,10,0.4626671287867203,42,,0,100,
+b1975_00015,MultiSequenceGAN,combined,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,8,1,64,50,16,4.47868761245845e-05,0.8,combined,univariate,16,10,0.4626671287867203,42,,0,100,
+b1975_00016,QGanModel,stock_id,univariate,error,error,,RuntimeError,"mat1 and mat2 must have the same dtype, but got Double and Float | r_forecasting/models/gan.py"", line 1031, in forward
+    return self.decoder(qout)
+           ^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/container.py"", line 259, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/linear.py"", line 134, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: mat1 and mat2 must have the same dtype, but got Double and Float
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,2,32,50,32,0.0024064571064767,0.8,stock_id,univariate,8,10,0.296594772769591,42,,0,100,
+b1975_00016,QGanModel,stock_id,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,2,32,50,32,0.0024064571064767,0.8,stock_id,univariate,8,10,0.296594772769591,42,,0,100,
+b1975_00016,QGanModel,stock_id,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,2,32,50,32,0.0024064571064767,0.8,stock_id,univariate,8,10,0.296594772769591,42,,0,100,
+b1975_00016,QGanModel,stock_id,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,8,6,2,32,50,32,0.0024064571064767,0.8,stock_id,univariate,8,10,0.296594772769591,42,,0,100,
+b1975_00017,MultiSequenceGAN,stock_id,univariate,error,error,,RuntimeError,"stack expects each tensor to be equal size, but got [64, 30] at entry 0 and [64, 1] at entry 1 | Traceback (most recent call last):
+  File ""/home/ton618wsl/qwhether_forecasting/benchmark.py"", line 397, in ray_trainable
+    history = model.train()
+              ^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2253, in train
+    self.history = self._train_single()
+                   ^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 2964, in _train_single
+    trend = self.trend_encoder(
+            ^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1783, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py"", line 1794, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/home/ton618wsl/qwhether_forecasting/models/gan.py"", line 1260, in forward
+    features = torch.stack(
+               ^^^^^^^^^^^^
+RuntimeError: stack expects each tensor to be equal size, but got [64, 30] at entry 0 and [64, 1] at entry 1
+",30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,2,128,50,64,0.0042768274006602,0.8,stock_id,univariate,4,5,0.0250541231659305,42,,0,100,
+b1975_00017,MultiSequenceGAN,stock_id,univariate,efficiency,timing,,Training Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,2,128,50,64,0.0042768274006602,0.8,stock_id,univariate,4,5,0.0250541231659305,42,,0,100,
+b1975_00017,MultiSequenceGAN,stock_id,univariate,efficiency,timing,,Inference Time,,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,2,128,50,64,0.0042768274006602,0.8,stock_id,univariate,4,5,0.0250541231659305,42,,0,100,
+b1975_00017,MultiSequenceGAN,stock_id,univariate,objective,ray,,MAE,1000000000000.0,30,15,"[""coalindia"", ""tcs"", ""hindalco"", ""jswsteel""]",4,data/<stock>_l10y.npy,target itself,target_dict,target_dict,variables_dict,QC,30,30,16,6,2,128,50,64,0.0042768274006602,0.8,stock_id,univariate,4,5,0.0250541231659305,42,,0,100,

@@ -1,0 +1,14 @@
+{
+  "batch_size": 16,
+  "data_mode": "univariate",
+  "hidden_size": 128,
+  "latent_size": 16,
+  "learning_rate": 0.00011247524011212941,
+  "model_class": "QGanModel",
+  "n_qubits": 4,
+  "quantum_layers": 1,
+  "recon_loss_weight": 4.207549942839987,
+  "stock_embedding_dim": 16,
+  "training_mode": "stock_id",
+  "variety_k": 10
+}
