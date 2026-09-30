@@ -1,0 +1,102 @@
+# ============================================================
+# Config for tune_train.py
+# Run: python tune_train.py --config configs/checkerboard.yaml
+# ============================================================
+
+# ------------------------------------------------------------
+# Experiment
+# ------------------------------------------------------------
+exp_name: GAN_BCHMRK_EXP1
+
+
+# ------------------------------------------------------------
+# Data
+# ------------------------------------------------------------
+dataset:
+  data_dir: data/                  # expects <data_dir>/<STOCK>_l10y.npy
+  stocks: [coalindia, tcs, hindalco, jswsteel]
+  variable_files: null
+  fixed_horizon: 30                 # forecast horizon used by the model
+
+# ------------------------------------------------------------
+# Fixed (non-tuned) parameters -> passed as constants to every trial.
+# Any key here is overridden if it also appears under search_space.
+# Keys must match the model constructor arg names (or ARG_ALIASES:
+# horizon <- fixed_horizon, n_samples <- samples).
+# ------------------------------------------------------------
+training:
+  epochs: 100
+  train_ratio: 0.8
+  seed: 42
+  lag: 0
+  shots: 1024                     # n_samples for generation / backtest            # used by model.backtest()
+  stock_embedding_dim: 8
+  variety_k: 3
+  recon_loss_weight: 0.1
+
+search_space:
+  historical_lookup: 
+    type: grid
+    values: [30]
+
+  train_type:
+    type: grid
+    values: [QC, CC]
+  
+  training_mode:
+    type: grid
+    values: [combined, stock_id]
+
+  samples:
+    type: grid
+    values: [10, 100, 1000]
+
+  prediction_horizon: 
+    type: grid
+    values: [6, 15, 30]
+
+  model: 
+    type: grid
+    values: [QGanModel, MultiSequenceGAN]
+  
+  data_mode:
+    type: grid 
+    values: [univariate]
+
+  learning_rate:
+    type: grid
+    values: [1.0e-3]
+
+  batch_size: 
+    type: grid
+    values: [32]           
+
+  latent_size:
+    type: grid
+    values: [8]
+
+  hidden_size:
+    type: grid
+    values: [32]
+
+  n_qubits:
+    type: grid
+    values: [2, 4, 6, 8, 10]
+
+  quantum_layers:
+    type: grid
+    values: [2, 4, 6, 8, 10]
+  
+  seed:
+    type: grid
+    values: [1, 2, 3]
+
+# ------------------------------------------------------------
+# Ray
+# ------------------------------------------------------------
+ray_config:
+  num_cpus: 48                      # CPUs per trial
+  num_gpus: 0.25                   # GPUs per trial (fractional OK); use 0 for CPU-only
+  ray_num_trial_samples: 1         # repeats of the grid (random params re-sampled each time)
+  max_trials: 10000
+  results_csv: results/combined_results.csv

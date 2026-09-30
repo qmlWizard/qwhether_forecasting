@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pennylane30
 #SBATCH --partition=gpu-small
-#SBATCH --nodes=20
+#SBATCH --nodes=20  
 #SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:2
